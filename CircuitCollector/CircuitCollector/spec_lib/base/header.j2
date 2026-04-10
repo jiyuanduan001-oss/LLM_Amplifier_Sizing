@@ -1,0 +1,20 @@
+.PARAM supply_voltage = {{supply_voltage}}
+.PARAM VCM_ratio = {{VCM_ratio}}
+.PARAM PARAM_CLOAD ={{PARAM_CLOAD}}p
+{% if use_ibias %}
+.PARAM Ib = {{ibias}}
+{% endif %}
+
+V1 vdd 0 'supply_voltage'
+V2 vss 0 0 
+
+{# These are the input voltage sources for the circuit. #}
+Vindc opin 0 'supply_voltage*VCM_ratio'
+Vin signal_in 0 dc 'supply_voltage*VCM_ratio' ac 1 sin('supply_voltage*VCM_ratio' {{ac_freq}}m {{ac_amp}})
+
+{# These components are "pseudo-devices" used for AC/DC decoupling in testbenches, typically used for:
+Extracting AC responses without affecting DC operating points;
+Injecting or probing signals without altering bias;
+Used in conjunction with .ac and .meas for gain and psrr measurements.#}
+Lfb opout opout_dc 1T
+Cin opout_dc signal_in 1T

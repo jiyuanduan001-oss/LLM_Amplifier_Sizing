@@ -1,0 +1,257 @@
+Ib Ib vss DC='Ib'
+x1 vss vdd opout_dc opin opout Ib {{netlist_name}}
+Cload1 opout 0 'PARAM_CLOAD'
+
+*   ACM TB    
+vcmdc cm0 0 'supply_voltage*VCM_ratio'
+vcmac1 cm1 cm0 0 ac=1
+vcmac2 cm2 cm3 0 ac=1
+Ib2 Ib2 vss DC='Ib'
+x2 vss vdd cm2 cm1 cm3 Ib2 {{netlist_name}}
+Cload2 cm3 0 'PARAM_CLOAD'
+
+* PSRR   TB   
+VGNDApsrr gndpsrr 0 0 AC=1
+VVDDApsrr vddpsrr 0 'supply_voltage'  AC=1
+Ib3 Ib3 vss DC='Ib'
+x3 vss vddpsrr ppsr1 opin ppsr1 Ib3 {{netlist_name}}
+Cload3 ppsr1 0 'PARAM_CLOAD'
+
+Ib4 Ib4 vss DC='Ib'
+x4 gndpsrr vdd npsr1 opin npsr1 Ib4 {{netlist_name}}
+Cload4 npsr1 0 'PARAM_CLOAD'
+
+* DC ALL  TB
+VVDDdc VDDdc 0 'supply_voltage'
+Ib5 Ib5 vss DC='Ib'
+x5 vss vdddc vout6 opin vout6 Ib5 {{netlist_name}}
+Cload5 vout6 0 'PARAM_CLOAD'
+
+{% if measure_slew_rate %}
+* Slew Rate  TB  (unity-gain feedback with pulse input)
+Ib6 Ib6 vss DC='Ib'
+x6 vss vdd srout srin srout Ib6 {{netlist_name}}
+Cload6 srout 0 'PARAM_CLOAD'
+Vpulse srin 0 PULSE('supply_voltage*VCM_ratio - {{sr_vstep}}/2' 'supply_voltage*VCM_ratio + {{sr_vstep}}/2' {{sr_tdelay}} {{sr_trise}} {{sr_tfall}} {{sr_tpw}} {{sr_tperiod}})
+{% endif %}
+
+{% if measure_output_swing %}
+* Output Swing  TB  (DC sweep of input around VCM)
+Ib7 Ib7 vss DC='Ib'
+x7 vss vdd swout swin swout Ib7 {{netlist_name}}
+Cload7 swout 0 'PARAM_CLOAD'
+Vswin swin 0 'supply_voltage*VCM_ratio'
+{% endif %}
+
+{% if measure_noise %}
+* Noise  TB  (dedicated open-loop instance with own AC feedback network)
+Ib8 Ib8 vss DC='Ib'
+Vn_indc nsopin 0 'supply_voltage*VCM_ratio'
+Vn_in ns_signal_in 0 dc 'supply_voltage*VCM_ratio' ac 1
+Ln_fb nsopout nsopout_dc 1T
+Cn_in nsopout_dc ns_signal_in 1T
+x8 vss vdd nsopout_dc nsopin nsopout Ib8 {{netlist_name}}
+Cload8 nsopout 0 'PARAM_CLOAD'
+{% endif %}
+
+.control
+save all
+{% if measure_output_swing and swing_transistor_dict %}
+{% for name, type in swing_transistor_dict.items() %}
+save @m.x7.x{{name}}.{{swing_device_prefix}}{{type}}[vds]
+save @m.x7.x{{name}}.{{swing_device_prefix}}{{type}}[vdsat]
+{% endfor %}
+{% endif %}
+.options savecurrents
+set filetype=ascii
+set units=degrees
+{% if temperature is defined %}
+option temp={{temperature}}
+{% endif %}
+
+{% if measure_DC%}
+DC temp -40 125 1
+* TC meas   
+meas dc maxval MAX V(vout6) from=-40 to=125
+meas dc minval MIN V(vout6) from=-40 to=125
+meas dc avgval AVG V(vout6) from=-40 to=125
+meas dc ppavl  PP V(vout6) from=-40 to=125
+let TC = ppavl/avgval/165
+* Power meas (at user-requested temperature)
+meas dc Ivdd_t FIND I(VVDDDC) AT={{temperature|default(27)}}
+let Power_ = -1 * Ivdd_t * {{supply_voltage}}
+let Power = Power_ * 1e6
+* Vos meas (at user-requested temperature)
+meas dc vout_t FIND V(vout6) AT={{temperature|default(27)}}
+let vos25 = vout_t - {{supply_voltage}} * {{VCM_ratio}}
+{# wrdata {{data_DC}} TC Power vos25 #}
+print TC Power vos25 > {{data_DC}}.txt
+* plot v(vout6)
+{% endif %}
+
+{% if measure_AC%}
+ac dec 10 0.1 1G
+meas ac cm_gain find vdb(cm3) at = 0.1
+meas ac dcgain_ find vdb(opout) at = 0.1
+let dcgain = abs(dcgain_)
+let cmrr = -cm_gain
+meas ac gain_bandwidth_product_ when vdb(opout)=0
+let gbp = gain_bandwidth_product_*1e-4
+meas ac phase_margin find vp(opout) when vdb(opout)=0
+meas ac DCPSRp find vdb(ppsr1) at = 0.1
+meas ac DCPSRn find vdb(npsr1) at = 0.1
+* --- Effective GBW vs measured GBW (gain-plateau detection) ---
+* The open-loop 0dB crossing (gain_bandwidth_product_) can be inflated
+* by a zero-compensation plateau when Rc is too large.
+* Detection: for -20dB/dec roll-off, gain at GBW/10 = +20dB.
+* If the LHP zero creates a shelf, the actual gain there is LOWER
+* (the slope was already shallow before reaching the check point).
+* A deficit means the measured GBW is inflated: the open-loop gain
+* only reached 0dB because the shelf extended it beyond the true
+* bandwidth. The deficit in dB equals the inflation.
+let f_check = gain_bandwidth_product_ / 10
+meas ac gain_at_check find vdb(opout) at=f_check
+* gain_peaking_dB = deficit from ideal 20dB (0 = healthy, >0 = plateau)
+let gain_peaking_dB_raw = 20 - gain_at_check
+* Clamp to >= 0 (no penalty for healthy designs)
+if gain_peaking_dB_raw > 0
+  let gain_peaking_dB = gain_peaking_dB_raw
+else
+  let gain_peaking_dB = 0
+end
+* true_GBW: the GBW that a -20dB/dec slope from DC gain would predict.
+* true_GBW = 10^(dcgain/20) × f where vdb(opout) = dcgain - 20*log10(f/f_p1)
+* Simplified: true_GBW ≈ measured_GBW / 10^(gain_peaking_dB/20)
+let true_GBW = gain_bandwidth_product_ / 10 ^ (gain_peaking_dB / 20)
+{# print AC specs to file #}
+print cm_gain cmrr DCPSRp DCPSRn dcgain_ > {{data_AC}}.txt
+print gain_bandwidth_product_ phase_margin gain_peaking_dB true_GBW > {{data_GBW_PM}}.txt
+* Save DC gain and GBW for noise integration
+let ac_dc_gain_linear = 10 ^ (dcgain / 20)
+set ac_dc_gain_str = "$&ac_dc_gain_linear"
+set gbw_str = "$&gain_bandwidth_product_"
+* plot vdb(opout) vdb(cm3) vdb(ppsr1) vdb(npsr1) vp(opout)
+{% endif %}
+
+{# op
+print @m.x1.xm1.msky130_fd_pr__nfet_01v8_lvt[vgs] @m.x1.xm1.msky130_fd_pr__nfet_01v8_lvt[vds] @m.x1.xm1.msky130_fd_pr__nfet_01v8_lvt[vth] > op_region.txt #}
+{# op
+.include /home/G30079315/code/CircuitCollector/CircuitCollector/spec_lib/opamp/two_stages_op_amp_dev_params.spice #}
+
+{% if measure_noise %}
+* ============================================================
+* Noise analysis — two-pass approach
+* ============================================================
+* Pass 1: full range (fstart–fstop) for spot density measurements.
+* Pass 2: fstart–GBW for correctly bounded integrated noise.
+*   IRN is integrated directly from inoise_spectrum (accounts for
+*   gain roll-off), NOT computed as ORN/A0.
+*   Integration bandwidth = GBW of this specific design.
+* ============================================================
+
+* --- Pass 1: full-range spectrum for spot densities ---
+noise V(nsopout) Vn_in dec 10 {{noise_fstart}} {{noise_fstop}}
+
+* Workaround: detect ngspice inoise/onoise label swap
+setplot noise1
+let raw_in_0 = inoise_spectrum[0]
+let raw_on_0 = onoise_spectrum[0]
+let is_normal = (raw_on_0 ge raw_in_0)
+let is_swapped = (raw_on_0 lt raw_in_0)
+
+* Spot densities at 1 Hz and fspot
+let idx_1Hz = 10 * log10(1 / {{noise_fstart}})
+let idx_spot = 10 * log10({{noise_fspot}} / {{noise_fstart}})
+let input_noise_density_1Hz = is_normal * inoise_spectrum[idx_1Hz] + is_swapped * onoise_spectrum[idx_1Hz]
+let input_noise_density_spot = is_normal * inoise_spectrum[idx_spot] + is_swapped * onoise_spectrum[idx_spot]
+let output_noise_density_1Hz = is_normal * onoise_spectrum[idx_1Hz] + is_swapped * inoise_spectrum[idx_1Hz]
+let output_noise_density_spot = is_normal * onoise_spectrum[idx_spot] + is_swapped * inoise_spectrum[idx_spot]
+let noise_dc_gain = (is_normal * raw_on_0 + is_swapped * raw_in_0) / (is_normal * raw_in_0 + is_swapped * raw_on_0)
+
+* Save pass-1 integrated totals (full BW, for reference)
+setplot noise2
+let raw_onoise_full = onoise_total
+let raw_inoise_full = inoise_total
+set raw_ofull_str = "$&raw_onoise_full"
+set raw_ifull_str = "$&raw_inoise_full"
+setplot noise1
+let int_a_full = $raw_ofull_str
+let int_b_full = $raw_ifull_str
+let int_orn_sel = (int_a_full ge int_b_full)
+let integrated_output_noise_full = int_orn_sel * int_a_full + (1 - int_orn_sel) * int_b_full
+let integrated_input_noise_full  = int_orn_sel * int_b_full + (1 - int_orn_sel) * int_a_full
+
+* --- Pass 2: integrate from fstart to bandwidth ---
+* Bandwidth = GBW / A0_linear (the open-loop -3dB frequency).
+* This is the frequency range where the amplifier provides its full
+* gain. Integrating inoise_spectrum to BW (not GBW) gives the
+* input-referred noise over the amplifier's flat-gain region.
+let bw_hz = $gbw_str / $ac_dc_gain_str
+set bw_str = "$&bw_hz"
+noise V(nsopout) Vn_in dec 10 {{noise_fstart}} $bw_str
+
+* Extract pass-2 totals (noise3 = spectrum, noise4 = totals)
+setplot noise4
+let raw_onoise_gbw = onoise_total
+let raw_inoise_gbw = inoise_total
+set raw_ogbw_str = "$&raw_onoise_gbw"
+set raw_igbw_str = "$&raw_inoise_gbw"
+
+* Select correct assignment (same swap direction as pass 1)
+setplot noise1
+let int_a_gbw = $raw_ogbw_str
+let int_b_gbw = $raw_igbw_str
+let integrated_output_noise = int_orn_sel * int_a_gbw + (1 - int_orn_sel) * int_b_gbw
+let integrated_input_noise  = int_orn_sel * int_b_gbw + (1 - int_orn_sel) * int_a_gbw
+
+* Print results
+print input_noise_density_1Hz input_noise_density_spot output_noise_density_1Hz output_noise_density_spot noise_dc_gain > {{data_NOISE}}.txt
+print integrated_output_noise integrated_input_noise >> {{data_NOISE}}.txt
+{% endif %}
+
+{% if measure_slew_rate %}
+* Slew rate: transient on x6 unity-gain TB with pulse input
+tran {{sr_tstep}} {{sr_tstop}}
+* Pre-compute the settled output values before and after the rising edge
+let sr_t_before = {{sr_tdelay}} - {{sr_tstep}}
+let sr_t_after  = {{sr_tdelay}} + {{sr_tpw}} - {{sr_tstep}}
+meas tran sr_vlow  FIND V(srout) AT=sr_t_before
+meas tran sr_vhigh FIND V(srout) AT=sr_t_after
+* Compute threshold voltages for SR measurement
+* Use 10%-60% for rising (large-signal region only)
+* Use 90%-40% for falling (large-signal region only)
+let sr_v10 = sr_vlow + 0.1*(sr_vhigh - sr_vlow)
+let sr_v40 = sr_vlow + 0.4*(sr_vhigh - sr_vlow)
+let sr_v60 = sr_vlow + 0.6*(sr_vhigh - sr_vlow)
+let sr_v90 = sr_vlow + 0.9*(sr_vhigh - sr_vlow)
+* Positive slew rate (rising edge, 10%-60%)
+meas tran sr_rise_t1 WHEN V(srout)=sr_v10 RISE=1
+meas tran sr_rise_t2 WHEN V(srout)=sr_v60 RISE=1
+let slew_rate_pos = (sr_v60 - sr_v10)/(sr_rise_t2 - sr_rise_t1)
+* Negative slew rate (falling edge, 90%-40%)
+meas tran sr_fall_t1 WHEN V(srout)=sr_v90 FALL=1
+meas tran sr_fall_t2 WHEN V(srout)=sr_v40 FALL=1
+let slew_rate_neg = (sr_v40 - sr_v90)/(sr_fall_t2 - sr_fall_t1)
+print slew_rate_pos slew_rate_neg > {{data_SLEW_RATE}}.txt
+{% endif %}
+
+{% if measure_output_swing %}
+* Output swing: DC sweep input of x7 from 0 to supply_voltage
+dc Vswin 0 {{supply_voltage}} {{swing_vstep}}
+* Output swing defined as range where |Vout - Vin| < 10 mV
+let vout_err = abs(V(swout) - V(swin))
+* vout_err: high (clipped) -> drops below 0.01 -> low (tracking) -> rises above 0.01 -> high (clipped)
+meas dc vout_low FIND V(swout) WHEN vout_err=0.01 FALL=1
+meas dc vout_high FIND V(swout) WHEN vout_err=0.01 RISE=LAST
+let output_swing = vout_high - vout_low
+print vout_low vout_high output_swing > {{data_OUTPUT_SWING}}.txt
+{% endif %}
+
+{% if extract_op_region%}
+op
+.include {{op_region_spice}}
+{% endif %}
+
+.endc
+
+.end

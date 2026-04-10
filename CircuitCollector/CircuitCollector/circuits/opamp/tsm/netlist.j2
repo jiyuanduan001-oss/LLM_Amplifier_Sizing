@@ -1,0 +1,13 @@
+   .subckt {{netlist_name}} gnda vdda vinn vinp vout Ib
+   XM2 net5 net1 vdda vdda sky130_fd_pr__pfet_01v8 l={{ M1_L }} w={{ M1_W }} m={{ M1_M }}
+   XM3 net1 vinn net2 gnda sky130_fd_pr__nfet_01v8 l={{ M3_L }} w={{ M3_W }} m={{ M3_M }}
+   XM1 net1 net1 vdda vdda sky130_fd_pr__pfet_01v8 l={{ M1_L }} w={{ M1_W }} m={{ M1_M }}
+   XM4 net5 vinp net2 gnda sky130_fd_pr__nfet_01v8 l={{ M3_L }} w={{ M3_W }} m={{ M3_M }}
+   XM6 net2 net3 gnda gnda sky130_fd_pr__nfet_01v8 l={{ M6_L }} w={{ M6_W }} m={{ M6_M }}
+   XM5 net3 net3 gnda gnda sky130_fd_pr__nfet_01v8 l={{ M5_L }} w={{ M5_W }} m={{ M5_M }}
+   XM8 vout net3 gnda gnda sky130_fd_pr__nfet_01v8 l={{ M8_L }} w={{ M8_W }} m={{ M8_M }}
+   XM7 vout net5 vdda vdda sky130_fd_pr__pfet_01v8 l={{ M7_L }} w={{ M7_W }} m={{ M7_M }}
+   R_Rc net5 net_rc {{ Rc_value }}
+   C_C1 net_rc vout {{ C1_value }}
+   I0 vdda net3 Ib
+   .ends {{netlist_name}}

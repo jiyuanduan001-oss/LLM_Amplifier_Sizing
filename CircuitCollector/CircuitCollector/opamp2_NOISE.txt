@@ -1,0 +1,7 @@
+input_noise_density_1hz = 2.498281e-06
+input_noise_density_spot = 5.004109e-08
+output_noise_density_1hz = 3.414354e-04
+output_noise_density_spot = 6.838305e-06
+noise_dc_gain = 1.366681e+02
+integrated_output_noise = 2.465270e-03
+integrated_input_noise = 1.803837e-05

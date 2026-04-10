@@ -1,0 +1,2 @@
+gain_bandwidth_product_ = 8.509319e+07
+phase_margin = 7.719652e+01

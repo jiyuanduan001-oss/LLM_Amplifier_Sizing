@@ -1,0 +1,72 @@
+# Python related
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Project specific data and results
+CircuitCollector/data/*
+!data/.gitkeep
+CircuitCollector/results/*
+!results/.gitkeep
+
+# IDE related files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Log files
+*.log
+logs/
+CircuitCollector/logs
+
+# Temporary files
+tmp/
+CircuitCollector/temp/
+
+# Local configuration
+.env
+.env.local
+config.local.yaml
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# nohup output
+nohup.out
+
+# ignore html files
+CircuitCollector/*.html
+
+# ignore output files
+CircuitCollector/output/*
+
+# ignore database files
+CircuitCollector/database/*
+
+# Claude Code local memory
+.claude/
+CLAUDE.md
