@@ -273,9 +273,9 @@ First, compute sub-block effective quantities for LOAD and TAIL.
 Then compute node capacitances and all specs (see `5t-ota-equation.md`
 and `5tota-transfer-function.md` for derivation).
 
-**All Cgd and Cdb values below MUST include extrinsic components** from
-`extrinsic_caps()` and `pdk_cdb()`. See `lut-parameter-derivation.md`
-Extrinsic Capacitance Correction section.
+**All Cgd values below MUST include extrinsic overlap** from
+`extrinsic_caps()`. Cdb uses the LUT value directly.
+See `lut-parameter-derivation.md` Extrinsic Capacitance Correction section.
 
 ```
 # Node capacitances (single load — see equation file for cascode variants)

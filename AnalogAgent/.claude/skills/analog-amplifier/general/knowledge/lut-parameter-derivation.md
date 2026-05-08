@@ -53,19 +53,15 @@ The BSIM4 model adds extrinsic terms that dominate for node capacitance
 calculations (poles, PM, SR). Always add these after deriving intrinsic caps:
 
 ```
-from scripts.lut_lookup import extrinsic_caps, pdk_cdb
+from scripts.lut_lookup import extrinsic_caps
 
 ex = extrinsic_caps(device_type, W, M=M)  # W in meters, M = multiplier count
 
 # Cgd: add gate-drain overlap (dominates in saturation, intrinsic ≈ 0)
 Cgd_total = Cgd + ex['cgd_ov']
 
-# Cdb: use pdk_cdb() INSTEAD of (cdb_w × W + extrinsic)
-# The LUT cdb_w is characterized from a test device whose drain area
-# scales with L. At L > 2µm the LUT overestimates Cdb by 2–7× because
-# real layouts use fixed drain geometry. pdk_cdb() computes Cdb from
-# first principles using actual drain area/perimeter.
-Cdb_total = pdk_cdb(device_type, W, M=M)
+# Cdb: use LUT value directly (no correction needed)
+Cdb_total = Cdb    # = cdb_w × W from LUT
 
 # Cgs: no correction needed (LUT cgs_w captures most gate charge)
 ```
@@ -73,12 +69,6 @@ Cdb_total = pdk_cdb(device_type, W, M=M)
 **Why Cgd correction matters:**
 Cgd_intrinsic ≈ 0 in saturation (channel charge partition). The physical
 gate-drain overlap (cgdo × W) is 10–80× larger and dominates node caps.
-
-**Why Cdb must use `pdk_cdb()`:**
-The LUT cdb_w is characterized from a test device whose drain diffusion
-area scales linearly with L. At L = 6 µm the LUT overestimates Cdb by
-5–7× because the test device has drain area ∝ L, but real layouts use
-fixed drain geometry (L_diff ≈ 0.29 µm regardless of L).
 
 ## Analytical PM Validity: GBW / ft Check
 
