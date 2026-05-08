@@ -36,7 +36,7 @@ Nodes:
 | BIAS_GEN | M4 | net3 (bias) | Diode-connected bias reference |
 
 Matching: M1 ≡ M2 (same W, L, M), M5 ≡ M6 (same W, L, M).
-M3/M4 share L; mirror ratio set by finger count (M3_M / M4_M).
+M3/M4 share L; mirror ratio set by multiplier (M3_M / M4_M).
 
 ---
 
@@ -135,9 +135,9 @@ same factor.
 `A0 = gm1 / (gds1 + gds_eq_LOAD)`
 
 To select L during initial sizing (single load): sweep L, query `gm_gds`
-for nfet, pick L where `gm_gds_M1 / 2 ≥ A0_target` (rough estimate
-assuming gds1 ≈ gds5). For cascode loads, a much shorter L1 can still
-meet gain because `gds_eq_LOAD << gds5`.
+for nfet, pick L where `gm_gds_M1 / 1.5 ≥ A0_target` (rough estimate;
+load L is chosen separately in Step 2). For cascode loads, a much shorter
+L1 can still meet gain because `gds_eq_LOAD << gds5`.
 
 ### Poles, Zeros, GBW, and Phase Margin
 
@@ -205,6 +205,11 @@ to output (vout). It adds negative phase at frequencies approaching ft.
 ```
 GBW = gm1 / (2π·C1)
 ```
+
+**⚠️ GBW / ft validity:** This formula and the PM formula below are
+valid only when GBW < ft for all signal-path devices. Check ft of M1
+and M5 after sizing — if GBW/ft > 0.3, the analytical PM will be
+optimistic (see `lut-parameter-derivation.md` GBW/ft table).
 
 #### Phase Margin
 

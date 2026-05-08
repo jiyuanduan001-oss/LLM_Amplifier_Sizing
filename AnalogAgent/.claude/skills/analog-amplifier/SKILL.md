@@ -29,6 +29,7 @@ general/
     design-review.md                 Final report
   knowledge/
     numerical-optimization.md        Post-sizing numerical optimizer
+    self-evolving-corrections.md     Regression-based PM corrections (grows with data)
 
 circuit-specific/<topology>/
     *-equation.md                    Circuit equations + LUT derivation

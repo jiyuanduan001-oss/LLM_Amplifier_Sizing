@@ -207,14 +207,14 @@ def role_target_to_params(
         WL_ratio = W_um / L_um
 
     # 5tota TOML constrains WL_ratio to [2.8, 10.0].
-    # Use M (finger multiplier) to keep per-finger WL_ratio within range.
+    # Use M (multiplier) to keep per-instance WL_ratio within range.
     WL_RATIO_MAX = 10.0
     M = max(1, math.ceil(WL_ratio / WL_RATIO_MAX))
-    WL_ratio_per_finger = WL_ratio / M
+    WL_ratio_per_inst = WL_ratio / M
 
     params = {
         f"{prefix}_L":        round(L_um, 3),
-        f"{prefix}_WL_ratio": round(WL_ratio_per_finger, 2),
+        f"{prefix}_WL_ratio": round(WL_ratio_per_inst, 2),
         f"{prefix}_M":        M,
     }
 
@@ -258,8 +258,8 @@ def sizing_result_to_params(
         params.update(role_target_to_params(role, target))
 
     # TAIL (M3) + BIAS_GEN (M4): size as a current mirror pair.
-    # M3 and M4 must share identical per-finger W/L so that the mirrored VGS
-    # maps to the correct I_tail.  The ratio is implemented via M (finger count).
+    # M3 and M4 must share identical per-instance W/L so that the mirrored VGS
+    # maps to the correct I_tail.  The ratio is implemented via M (multiplier).
     tail   = sizing_result.roles.get("TAIL")
     bias   = sizing_result.roles.get("BIAS_GEN")
     if tail and bias and tail.id_derived and bias.id_derived:
@@ -282,18 +282,18 @@ def sizing_result_to_params(
 
         # Scale into allowed WL_ratio range using M for M4
         M4 = max(1, math.ceil(WL_unit / WL_RATIO_MAX))
-        WL_per_finger = max(2.8, WL_unit / M4)
+        WL_per_inst = max(2.8, WL_unit / M4)
 
-        # M3 finger count = round(I_tail / Ib) x M4 fingers
+        # M3 multiplier = round(I_tail / Ib) x M4 multiplier
         mirror_ratio = id_main / id_ref
         M3 = max(1, round(mirror_ratio * M4))
 
         params.update({
             "M4_L":        round(L_um, 3),
-            "M4_WL_ratio": round(WL_per_finger, 2),
+            "M4_WL_ratio": round(WL_per_inst, 2),
             "M4_M":        M4,
             "M3_L":        round(L_um, 3),
-            "M3_WL_ratio": round(WL_per_finger, 2),  # identical to M4
+            "M3_WL_ratio": round(WL_per_inst, 2),  # identical to M4
             "M3_M":        M3,
         })
     elif tail:

@@ -27,8 +27,8 @@ DEFAULT_SPEC_LIST = [
     # DC
     "power", "vos25", "tc",
     # Noise
-    "input_noise_density_1Hz", "input_noise_density_spot",
-    "output_noise_density_1Hz", "output_noise_density_spot",
+    "input_noise_density_1hz", "input_noise_density_spot",
+    "output_noise_density_1hz", "output_noise_density_spot",
     "integrated_input_noise", "integrated_output_noise",
     # Slew rate
     "slew_rate_pos", "slew_rate_neg",

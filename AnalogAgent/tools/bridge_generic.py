@@ -6,7 +6,7 @@ The role-to-device mapping is provided at call time, not hardcoded.
 
 Core function: sizing_result_to_params(roles, role_device_map, ...)
   - Converts RoleTarget objects to flat CircuitCollector params
-  - Handles mirror groups (shared per-finger W/L, scaled M)
+  - Handles mirror groups (shared per-instance W/L, scaled M)
   - Handles passives (Cc, Rc, etc.)
 """
 
@@ -22,15 +22,15 @@ from tools.bridge import RoleTarget, TransistorOP, parse_response, parse_specs
 from tools.api_client import simulate, check_server, DEFAULT_SPEC_LIST
 
 
-# WL_ratio upper bound — split wide devices into multiple fingers.
+# WL_ratio upper bound — split wide devices into multiple instances (increase M).
 # No lower bound on WL_ratio; PDK minimum width enforced separately.
 _WL_MAX = 10.0
 
-# Maximum width per finger (µm).  When the computed W exceeds this,
-# additional fingers are added so that each finger stays within the limit.
+# Maximum width per instance (µm).  When the computed W exceeds this,
+# M is increased so that each instance stays within the limit.
 # This matters for long-channel devices where WL_ratio is modest but
 # W = WL_ratio × L is large.
-_W_PER_FINGER_MAX_UM = 5.0
+_W_PER_INST_MAX_UM = 5.0
 
 # SKY130 PDK minimum device widths (µm).
 _W_MIN_UM = {
@@ -97,23 +97,23 @@ def _role_to_params(
     W_um = max(w_min, W_um)
     WL_ratio = W_um / L_um
 
-    # Split into multiple fingers if WL_ratio or W_per_finger exceeds bounds
+    # Split into multiple instances if WL_ratio or W per instance exceeds bounds
     M_wl = max(1, math.ceil(WL_ratio / wl_max))
-    W_per_finger = L_um * WL_ratio / M_wl
-    M_w = max(1, math.ceil(W_per_finger / _W_PER_FINGER_MAX_UM))
+    W_per_inst = L_um * WL_ratio / M_wl
+    M_w = max(1, math.ceil(W_per_inst / _W_PER_INST_MAX_UM))
     M = max(M_wl, M_w)
-    WL_per_finger = WL_ratio / M
+    WL_per_inst = WL_ratio / M
 
     return {
         f"{prefix}_L":        round(L_um, 3),
-        f"{prefix}_WL_ratio": round(WL_per_finger, 2),
+        f"{prefix}_WL_ratio": round(WL_per_inst, 2),
         f"{prefix}_M":        M,
     }
 
 
 def _detect_mirror_groups(role_device_map: dict[str, dict]) -> list[list[str]]:
     """
-    Detect groups of roles that share the same per-finger W/L (current mirrors).
+    Detect groups of roles that share the same per-instance W/L (current mirrors).
 
     Mirror groups are roles whose primary devices share L and WL_ratio.
     Convention: roles with `"mirror_of": "<role>"` in the map form a group.
@@ -227,16 +227,16 @@ def sizing_result_to_params(
                 WL_unit = w_min / L_um
 
             M_ref_wl = max(1, math.ceil(WL_unit / wl_max))
-            W_per_finger = L_um * WL_unit / M_ref_wl
-            M_ref_w = max(1, math.ceil(W_per_finger / _W_PER_FINGER_MAX_UM))
+            W_per_inst = L_um * WL_unit / M_ref_wl
+            M_ref_w = max(1, math.ceil(W_per_inst / _W_PER_INST_MAX_UM))
             M_ref = max(M_ref_wl, M_ref_w)
-            WL_per_finger = WL_unit / M_ref
+            WL_per_inst = WL_unit / M_ref
 
             # Set reference device params
             ref_prefix = ref_mapping["primary"]
             params.update({
                 f"{ref_prefix}_L":        round(L_um, 3),
-                f"{ref_prefix}_WL_ratio": round(WL_per_finger, 2),
+                f"{ref_prefix}_WL_ratio": round(WL_per_inst, 2),
                 f"{ref_prefix}_M":        M_ref,
             })
 
@@ -256,7 +256,7 @@ def sizing_result_to_params(
                 M_mirror = max(1, round(mirror_ratio * M_ref))
 
                 # Sanity check: if mirror ratio ≈ 1.0, the caller may have
-                # passed per-finger current instead of the total current the
+                # passed per-instance current instead of the total current the
                 # mirror role should carry.  E.g. TAIL mirrors BIAS_GEN and
                 # should carry M× more current; passing I_bias for both gives
                 # ratio = 1 and M_mirror = M_ref = 1 (wrong).
@@ -271,13 +271,13 @@ def sizing_result_to_params(
                         f"ref={id_ref:.2e}) → M_{mirror_prefix} = {M_mirror}. "
                         f"If '{mirror_role}' should carry more current than "
                         f"'{ref_role}', ensure id_derived is the TOTAL current "
-                        f"for the role, not the per-finger current.",
+                        f"for the role, not the per-instance current.",
                         stacklevel=3,
                     )
 
                 params.update({
                     f"{mirror_prefix}_L":        round(L_mirror, 3),
-                    f"{mirror_prefix}_WL_ratio": round(WL_per_finger, 2),
+                    f"{mirror_prefix}_WL_ratio": round(WL_per_inst, 2),
                     f"{mirror_prefix}_M":        M_mirror,
                 })
 
@@ -301,6 +301,7 @@ def simulate_circuit(
     CL: Optional[float] = None,
     extra_ports: Optional[dict] = None,
     measure_mismatch: Optional[bool] = None,
+    save_waveforms: Optional[bool] = None,
     output_dir: Optional[str] = None,
 ) -> dict:
     """
@@ -340,6 +341,8 @@ def simulate_circuit(
         merged["extra_ports"] = dict(extra_ports)
     if measure_mismatch is not None:
         merged["measure_mismatch"] = bool(measure_mismatch)
+    if save_waveforms is not None:
+        merged["save_waveforms"] = bool(save_waveforms)
 
     response = simulate(
         params=merged,

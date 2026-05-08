@@ -86,8 +86,8 @@ Devices that share the same W/L sizing form a mirror group. Detect by:
 Within a mirror group:
 - The **reference** device (diode-connected or primary) gets its own
   parameter prefix and is sized independently.
-- **Mirror** devices share the same per-finger W/L as the reference.
-  Their current is set by the finger multiplier M.
+- **Mirror** devices share the same per-instance W/L as the reference.
+  Their current is set by the multiplier M.
 
 **Matched pair detection:**
 
@@ -262,7 +262,7 @@ role_device_map = {
 - `mirrors` lists devices that share the exact same W/L/M (matched pairs,
   handled by TOML `mosfet_pairs`)
 - `mirror_of` indicates a current-mirror relationship where this role
-  shares per-finger W/L with the reference role, and uses M to set
+  shares per-instance W/L with the reference role, and uses multiplier M to set
   the current ratio. The generic bridge handles this automatically.
 - `device_type` is `"nfet"` or `"pfet"` based on the model string
 - `sub_block_type` records the detected mirror/load structure (default

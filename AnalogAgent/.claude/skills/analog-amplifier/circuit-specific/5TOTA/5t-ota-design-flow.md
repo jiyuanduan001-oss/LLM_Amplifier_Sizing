@@ -21,7 +21,7 @@ Invoked after circuit-understanding identifies the topology as 5T OTA.
 ## Bias Current Relationships
 
 ```
-I_tail = ID3 = (M3_fingers / M4_fingers) × I_bias
+I_tail = ID3 = (M3_M / M4_M) × I_bias
 ID1 = ID2 = I_tail / 2
 ID5 = ID6 = ID1
 P = (I_tail + I_bias) × VDD
@@ -49,16 +49,23 @@ gm1 = 2π × GBW × CL
 | 10–100 MHz  | 10–14 S/A         | Moderate       | Balanced across all aspects |
 | > 100 MHz   | 5–10 S/A          | Strong         | High speed                 |
 
-**1c. Determine L from gain requirement:**
+**1c. Determine L from gain requirement (with GBW/ft guard):**
 
 Sweep available L values in the LUT. For each L, query:
 ```
 gm_gds_M1 = lut_query('nfet', 'gm_gds', L, gm_id_val=(gm/ID)_1)
+ft_M1     = lut_query('nfet', 'ft',     L, gm_id_val=(gm/ID)_1)
 ```
-Pick the shortest L where `gm_gds_M1 / 2 ≥ A0_target` (linear, not dB).
+Pick the shortest L where **both** conditions hold:
+1. `gm_gds_M1 / 1.5 ≥ A0_target` (linear, not dB)  (gain requirement)
+2. `GBW_target / ft_M1 < 0.4`  (analytical PM validity — see `lut-parameter-derivation.md`)
 
-If no L satisfies this:
-→ Print: "INFEASIBLE: 5T OTA cannot achieve required gain."
+If a candidate L meets the gain requirement but violates GBW/ft < 0.4,
+**reject it** and continue to a shorter L.
+
+If no L satisfies both:
+→ Print: "INFEASIBLE: 5T OTA cannot achieve required gain while
+   maintaining GBW/ft < 0.4."
 → Ask user to relax gain or switch topology. Do NOT proceed.
 
 **1d. Derive all DIFF_PAIR parameters from LUT:**
@@ -175,7 +182,7 @@ ID3 = I_tail (already known from Step 1).
 **3a. Determine multiplier ratio first:**
 
 M4 (BIAS_GEN) is the unit cell with M4_M = 1. M3 (TAIL) uses multiple
-parallel fingers to set the current ratio:
+parallel instances (multiplier M) to set the current ratio:
 
 ```
 M4_M = 1
@@ -187,20 +194,20 @@ M3_M = round(I_tail / I_bias)
 Use (gm/ID)_3 = 10–14 S/A. Initial L3 = 1.0 µm (snap to the nearest value in
 `list_available_L('nfet', corner, temp)`).
 
-**3c. Derive single-finger (unit cell) parameters from LUT:**
+**3c. Derive unit-cell (single-instance) parameters from LUT:**
 
-> Derive per-finger parameters for **M3** (nfet) using
+> Derive per-instance parameters for **M3** (nfet) using
 > `general/knowledge/lut-parameter-derivation.md` with:
-> device_type='nfet', gm_id=(gm/ID)_3, L=L3, ID=I_bias (per-finger current)
+> device_type='nfet', gm_id=(gm/ID)_3, L=L3, ID=I_bias (per-instance current)
 >
-> This produces: gm_finger, W3, gds_finger, ft3, Cgs_finger, Cgd_finger, Cdb_finger, vdsat3.
+> This produces: gm_inst, W3, gds_inst, ft3, Cgs_inst, Cgd_inst, Cdb_inst, vdsat3.
 
 **3d. Scale to total M3 (TAIL) device:**
 
-Scale total quantities by finger count M3_M (see `lut-parameter-derivation.md`
+Scale total quantities by multiplier M3_M (see `lut-parameter-derivation.md`
 mirror scaling section):
 ```
-gm3 = gm_finger × M3_M,  gds3 = gds_finger × M3_M,  (same for Cgs3, Cgd3, Cdb3)
+gm3 = gm_inst × M3_M,  gds3 = gds_inst × M3_M,  (same for Cgs3, Cgd3, Cdb3)
 ```
 
 **3e. BIAS_GEN (M4):**
@@ -264,7 +271,12 @@ First, compute sub-block effective quantities for LOAD and TAIL.
 > `gds_eq_TAIL`, `V_headroom_TAIL` for use in the spec equations below.
 
 Then compute node capacitances and all specs (see `5t-ota-equation.md`
-and `5tota-transfer-function.md` for derivation):
+and `5tota-transfer-function.md` for derivation).
+
+**All Cgd and Cdb values below MUST include extrinsic components** from
+`extrinsic_caps()` and `pdk_cdb()`. See `lut-parameter-derivation.md`
+Extrinsic Capacitance Correction section.
+
 ```
 # Node capacitances (single load — see equation file for cascode variants)
 C1     = CL + Cdb1 + Cdb5 + Cgd1 + Cgd5             # total cap at vout
@@ -304,6 +316,24 @@ PSRR⁻ ≈ CMRR
 P     = (I_tail + I_bias) × VDD
 ```
 
+**GBW/ft validity check (MANDATORY before printing results):**
+
+After computing GBW, verify that GBW/ft < 0.4 for every signal-path
+device. This guards against unreliable analytical PM predictions.
+
+```
+GBW/ft CHECK
+=============
+Device | ft (MHz) | GBW/ft | Status
+M1     | <>       | <>     | ✅ / ❌ REJECT (≥ 0.4)
+M5     | <>       | <>     | ✅ / ❌ REJECT (≥ 0.4)
+
+If any device has GBW/ft ≥ 0.4:
+  → Reduce L for that device (shorter L → higher ft)
+  → Re-derive LUT parameters for the affected role
+  → Repeat Step 4
+```
+
 Print the results and compare against user spec targets:
 
 ```
@@ -318,7 +348,8 @@ PM            | <>°        | <>°         | ✅/❌
 ```
 
 **Decision:**
-- All specs met → proceed to Step 5 (simulation).
+- All specs met AND all GBW/ft < 0.4 → proceed to Step 5 (simulation).
+- Any GBW/ft ≥ 0.4 → reduce L for violating device, re-derive, repeat Step 4.
 - Any spec failed → invoke `5t-ota-root-cause-diagnosis.md` to identify
   which device parameter to adjust. Apply the fix, re-derive LUT values
   for the affected role, and repeat Step 4.
@@ -328,8 +359,8 @@ PM            | <>°        | <>°         | ✅/❌
 
 Call `convert_sizing` and `simulate_circuit`:
 
-**⚠️ `id_derived` MUST be the TOTAL current the role carries, not per-finger.**
-Step 3 works with per-finger parameters for LUT queries, but `convert_sizing`
+**⚠️ `id_derived` MUST be the TOTAL current the role carries, not per-instance.**
+Step 3 works with per-instance parameters for LUT queries, but `convert_sizing`
 needs the total current to compute mirror ratios.  Specifically:
 - `TAIL.id_derived = I_tail` (total tail current, e.g. 40 µA), **NOT** `I_bias`
 - `BIAS_GEN.id_derived = I_bias` (reference current, e.g. 5 µA)
@@ -340,7 +371,7 @@ Passing `I_bias` for both produces `M3_M = 1` → 5× current deficit.
 from tools import convert_sizing, simulate_circuit
 
 result = convert_sizing(
-    topology='5t_ota',
+    topology=topology_name,   # from ensure_topology_registered() in Stage [2]
     roles_raw={
         "DIFF_PAIR": {"gm_id_target": (gm/ID)_1, "L_guidance_um": L1, "id_derived": ID1},
         "LOAD":      {"gm_id_target": (gm/ID)_5, "L_guidance_um": L5, "id_derived": ID5},
@@ -365,11 +396,12 @@ sim = simulate_circuit(
     #   user's Mismatch field is BLANK → measure_mismatch=False
     #   user provided a numeric Mismatch target → measure_mismatch=True
     measure_mismatch=mismatch_enabled,   # bool from Stage [1] spec form
-    # LV-cascode bias overrides — include every time LOAD or TAIL is
-    # lv_cascode, recomputed from the CURRENT iteration's sized vdsat/vth:
+    # LV-cascode bias overrides — ONLY if any role has sub_block_type == "lv_cascode":
+    # Uncomment and populate when lv_cascode is detected in circuit-understanding.
+    # For single or regular cascode sub-blocks, omit extra_ports entirely.
     # extra_ports={
-    #     "Vbias_cas_p": VDD - (vdsat5 + vdsat_cas + abs(vth_cas)),       # PMOS load
-    #     "Vbias_cas_n": vdsat3 + vdsat_tcas + abs(vth_tcas),             # NMOS tail
+    #     "Vbias_cas_p": VDD - (vdsat5 + vdsat_cas + abs(vth_cas)),       # PMOS load lv_cascode
+    #     "Vbias_cas_n": vdsat3 + vdsat_tcas + abs(vth_tcas),             # NMOS tail lv_cascode
     # },
 )
 ```

@@ -171,13 +171,13 @@ TOOL_DEFINITIONS = [
         "description": (
             "Convert per-role sizing targets into CircuitCollector parameter dict. "
             "This translates gm/Id-space decisions (gm_id, L, Id per role) into "
-            "the W/L ratio, finger count, and device params that CircuitCollector expects. "
+            "the W/L ratio, multiplier M, and device params that CircuitCollector expects. "
             "Supports two topologies:\n"
             "  - '5t_ota': 4 roles (DIFF_PAIR, LOAD, TAIL, BIAS_GEN) → 5tota\n"
             "  - 'twostage': 6 roles (DIFF_PAIR, LOAD, BIAS_GEN, TAIL, OUTPUT_CS, OUTPUT_BIAS) → tsm\n"
             "Each role needs: gm_id_target (S/A), L_guidance_um (µm), id_derived (A). "
             "The tool uses LUT data to compute W from (gm_id, L, Id), then applies "
-            "WL_ratio constraints and finger multiplier logic. "
+            "WL_ratio constraints and multiplier (M) logic. "
             "For twostage topology, also provide Cc_f (compensation cap in F) and Ib_a (bias current in A)."
         ),
         "input_schema": {

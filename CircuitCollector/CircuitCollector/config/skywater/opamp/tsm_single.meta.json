@@ -1,0 +1,59 @@
+{
+  "config_path": "config/skywater/opamp/tsm_single.toml",
+  "requires_Cc": true,
+  "roles": [
+    "LOAD",
+    "DIFF_PAIR",
+    "BIAS_GEN",
+    "TAIL",
+    "OUTPUT_CS",
+    "OUTPUT_BIAS"
+  ],
+  "role_device_map": {
+    "LOAD": {
+      "primary": "M1",
+      "mirrors": [
+        "M2"
+      ],
+      "device_type": "pfet",
+      "sub_block_type": "single"
+    },
+    "DIFF_PAIR": {
+      "primary": "M3",
+      "mirrors": [
+        "M4"
+      ],
+      "device_type": "nfet"
+    },
+    "BIAS_GEN": {
+      "primary": "M5",
+      "mirrors": [],
+      "device_type": "nfet",
+      "sub_block_type": "single"
+    },
+    "TAIL": {
+      "primary": "M6",
+      "mirrors": [],
+      "device_type": "nfet",
+      "mirror_of": "BIAS_GEN",
+      "sub_block_type": "single"
+    },
+    "OUTPUT_CS": {
+      "primary": "M7",
+      "mirrors": [],
+      "device_type": "pfet"
+    },
+    "OUTPUT_BIAS": {
+      "primary": "M8",
+      "mirrors": [],
+      "device_type": "nfet",
+      "mirror_of": "BIAS_GEN",
+      "sub_block_type": "single"
+    }
+  },
+  "passive_params": [
+    "C1_value",
+    "Rc_value"
+  ],
+  "extra_ports": {}
+}

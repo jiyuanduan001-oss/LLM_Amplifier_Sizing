@@ -112,6 +112,11 @@ class TestbenchGenerator:
             "extract_op_region": self.raw_config.get("circuit", {})
             .get("op_region", {})
             .get("extract_op_region", False),
+            # Waveform saving — when True, wrdata commands dump AC/transient
+            # waveform data to files for post-analysis.
+            "save_waveforms": self.raw_config.get("testbench", {})
+            .get("save_waveforms", False),
+            "data_prefix": self.netlist_name,
             # Extra DC bias ports (e.g. LV cascode bias voltages). Map of
             # port_name -> DC voltage (V). Empty when unused — the testbench
             # templates check truthiness before emitting sources.

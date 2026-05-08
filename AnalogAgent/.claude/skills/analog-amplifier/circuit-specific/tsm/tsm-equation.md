@@ -44,7 +44,7 @@ Nodes (from netlist):
 | COMPENSATION | Cc, Rc | — | Miller capacitor + nulling resistor |
 
 Matching: M3 ≡ M4 (same W, L, M), M1 ≡ M2 (same W, L, M).
-M5/M6/M8 share L; mirror ratios set by finger count.
+M5/M6/M8 share L; mirror ratios set by multiplier M.
 
 ---
 
@@ -158,7 +158,7 @@ Total open-loop DC gain:
 `A0 = A_v1 × A_v2`
 
 To select L during initial sizing (single load): sweep L, query
-`gm_gds` for nfet, pick L where `gm_gds_M3 / 2 ≥ sqrt(A0_target_linear)`.
+`gm_gds` for nfet, pick L where `gm_gds_M3 / 1.5 ≥ sqrt(A0_target_linear)`.
 For cascode/lv_cascode loads, much shorter L can meet the gain because
 the cascode provides an extra (gm_cas·ro_cas) factor.
 
@@ -179,36 +179,29 @@ z = 1 / [Cc · (1/gm7 - Rc)]
 
 **Preferred: LHP zero cancels output pole p2.**
 
-Setting z_LHP = p2 = gm7·Cc/(C1·Cc + C1·CTL + Cc·CTL) and solving:
+To compute Rc, first obtain the exact p2 from the KCL-derived cubic
+(see "Poles" section below), then set z_Rc = p2:
 ```
-Rc = (1/gm7) · (Cc + C1)·(Cc + CTL) / Cc²
-
-where:
-  C1  = Cgs7 + Cdb2 + Cdb4 + Cgd2 + Cgd4    [cap at net5]
-  CTL = CL + Cdb7 + Cdb8 + Cgd7 + Cgd8       [total output cap]
+Rc = 1/gm7 + 1/(p2_kcl · Cc)
 ```
 
-Simplified (when C1 << Cc and parasitic drain caps << CL):
+**Approximate Rc formula** (for initial estimation only):
 ```
-Rc ≈ (1/gm7) · (1 + CL/Cc)
+Rc_approx = (1/gm7) · (Cc + C1)·(Cc + CTL) / Cc²
 ```
-
-This removes both the zero and p2 from the loop gain, leaving only p3
-(and p4) as non-dominant poles — significantly improving PM.
-
-With p2 cancelled, the transfer function simplifies to three effective poles:
-```
-H(s) ≈ A0 / [(1 + s/p1)(1 + s/p3)(1 + s/p4)]
-```
-p4 = gm7/C1 arises from the Rc–C1 interaction at net5.
-
-See `tsm-transfer-function.md` for the full KCL-based derivation with
-all parasitic capacitances.
+This approximation overestimates Rc because it uses the simplified p2
+formula. Always recompute Rc from the KCL-derived p2 before simulation.
 
 #### Node Capacitances
 
 The pole locations depend on total capacitance at each node. These
-change with the LOAD and OUTPUT_BIAS sub-block types:
+change with the LOAD and OUTPUT_BIAS sub-block types.
+
+**IMPORTANT — Use corrected Cgd and Cdb (see `lut-parameter-derivation.md`):**
+All Cgd and Cdb terms below MUST include extrinsic components from
+`extrinsic_caps()`. The LUT intrinsic Cgd is ≈ 0 in saturation; the
+physical gate-drain overlap dominates. LUT Cdb misses junction sidewall
+terms that are significant for multi-instance (high-M) devices.
 
 **Single load / single output-bias:**
 ```
@@ -233,27 +226,51 @@ C_int_OBIAS = Cgs_obcas + Cdb8 + Cgd8
 
 #### Poles
 
-**Dominant pole (p1) — Miller-multiplied Cc at output:**
-```
-p1 = gm3 / (A0 · Cc)   [rad/s]
-```
-
-**Output pole (p2):**
-```
-p2 = gm7·Cc / (C1·Cc + C1·CTL + Cc·CTL)   [rad/s]
-```
-
-**Mirror pole (p3) — at net1:**
+**Mirror pole (p3) — at net1 (separate node, independent of Rc-Cc):**
 ```
 G_net1 = gm1 + gds1 + gds3              [M1 diode + M3 gds]
 p3 = G_net1 / C2                         [rad/s]
 ```
 LHP zero at `≈ 2×p3` (mirror zero, same doublet as 5T OTA).
 
-**Compensation pole (p4) — at net5 from Rc–C1 interaction:**
+**p1, p2, p4 — from KCL cubic (exact, coupled net5-vout system):**
+
+The net5 and vout nodes are coupled through the Rc-Cc branch and Cgd7.
+The standard simplified formulas `p2 = gm7·Cc/(C1·Cc+C1·CTL+Cc·CTL)`
+and `p4 = gm7/C1` ignore this coupling and produce large errors:
+p2 is underestimated by ~40% and p4 is overestimated by ~4×.
+
+Instead, solve the exact KCL-derived cubic polynomial for the three
+poles of the coupled 2-node system. Define:
+
+```python
+tau    = Rc * Cc                         # Rc-Cc time constant
+Go     = gds7 + gds_eq_OBIAS            # output conductance
+G1     = gds_eq_LOAD + gds3             # net5 conductance (gds2=gds_LOAD, gds4=gds3)
+Ccomp  = Cc + Cgd7                       # total compensation cap
+Gt     = gm7 + Go + G1                  # ≈ gm7 (dominant)
+Ct     = CTL + C1                        # total node cap
+
+# Cubic: d3·s³ + d2·s² + d1·s + d0 = 0
+d0 = Go * G1
+d1 = Go*C1 + G1*CTL + Go*G1*tau + Ccomp*Gt
+d2 = C1*CTL + (Go*C1 + G1*CTL)*tau + Ccomp*Ct + tau*Cgd7*Gt
+d3 = C1*CTL*tau + tau*Cgd7*Ct
+
+poles = numpy.roots([d3, d2, d1, d0])    # 3 real negative roots
+# Sort by magnitude: poles[0]=p1 (dominant), poles[1]=p2, poles[2]=p4
 ```
-p4 = gm7 / C1   [rad/s]
-```
+
+All three poles are real and in the LHP for physically valid parameters.
+The dominant pole p1 is at ~kHz (sets the -3dB point), p2 is the output
+pole (~50-100 MHz), and p4 is the compensation pole (~100-300 MHz).
+
+**Why the simplified formulas fail:** At frequencies above
+`1/(2π·Rc·Cc)`, the Rc-Cc branch impedance transitions from capacitive
+to resistive (Rc). The conductance `1/Rc` then loads the net5 node,
+pulling p4 down by ~4× from the unloaded `gm7/C1`. Simultaneously,
+the Rc delay weakens the Miller feedback, pushing p2 up by ~40%.
+The cubic captures this coupling exactly.
 
 **Cascode internal poles** (only when sub-block is cascode/lv_cascode):
 ```
@@ -263,17 +280,12 @@ p_int_OBIAS = gm_obcas / C_int_OBIAS
 
 #### Zeros
 
-**RHP zero from Cc feedforward (before Rc compensation):**
+**LHP zero from Rc nulling:**
 ```
-z_rhp = gm7 / Cc − 1/(Rc·Cc)   [rad/s]
+z_Rc = -1 / [Cc · (Rc - 1/gm7)]   [rad/s, LHP when Rc > 1/gm7]
 ```
-When Rc > 1/gm7, this moves to the LHP.
-
-**LHP zero from Rc nulling (placed to cancel p2):**
-Setting z_LHP = p2 gives:
-```
-Rc = (1/gm7) · (Cc + C1)·(Cc + CTL) / Cc²
-```
+This formula is accurate (< 1% error vs SPICE). Rc is chosen so that
+`z_Rc = p2_kcl` (the KCL-derived p2 from the cubic above).
 
 **Mirror zero (LHP):**
 ```
@@ -292,17 +304,32 @@ fz_rhp_dp = gm3 / (2π·Cgd3)             [from diff pair Cgd to net5/net1]
 GBW = gm3 / (2π·Cc)
 ```
 
+**⚠️ GBW / ft validity:** This formula and the PM formula below are
+valid only when GBW < ft for all signal-path devices. Check ft of M3,
+M1, and M7 after sizing — if GBW/ft > 0.3 for any device, the
+analytical PM will be optimistic (see `lut-parameter-derivation.md`
+GBW/ft table).
+
 #### Phase Margin
 
-**General (all poles):**
+Use the KCL-derived p2 and p4 from the cubic polynomial (NOT the
+simplified formulas). The PM formula structure is the same — only
+the pole values change.
+
+**General (all poles, using KCL-derived p2_kcl and p4_kcl):**
 ```
-PM = 90° − arctan(ω_c/p2) − arctan(ω_c/p3) − arctan(ω_c/p4) − arctan(ω_c/fz_rhp_dp·2π)
+PM = 90° − arctan(ω_c/p2_kcl) − arctan(ω_c/p3) − arctan(ω_c/p4_kcl)
+     + arctan(ω_c/z_Rc) + arctan(ω_c/fz_mirror·2π) − arctan(ω_c/fz_rhp_dp·2π)
 ```
 
-**With Rc cancelling p2 (preferred operating mode):**
+When Rc is designed so that z_Rc = p2_kcl, the p2 and z_Rc terms
+nearly cancel (residual ~1-2°), leaving:
 ```
-PM = 90° − arctan(ω_c/p3) − arctan(ω_c/p4) + arctan(ω_c/fz_mirror·2π) − arctan(ω_c/fz_rhp_dp·2π)
+PM ≈ 90° − arctan(ω_c/p3) − arctan(ω_c/p4_kcl) + arctan(ω_c/fz_mirror·2π)
 ```
+
+Note: p4_kcl is typically 100-300 MHz (vs the simplified `gm7/C1` which
+gives 500-800 MHz). This is the dominant non-mirror phase contribution.
 
 **Additional cascode internal pole penalties:**
 ```
@@ -314,21 +341,48 @@ Design constraint: each cascode `p_int > 3 × ω_c`.
 
 ### Slew Rate
 
+**Sustained slew rate (standard formula):**
 ```
-SR+ = I_tail / Cc
-SR- = min(I_tail / Cc,  ID7 / CTL)
+SR+_sustained = I_tail / Cc
+SR-            = min(I_tail / Cc,  ID7 / CTL)
 ```
 
 where `CTL = CL + Cdb7 + Cdb8 + Cgd7 + Cgd8` is the total output
-capacitance including parasitics.
+capacitance including parasitics (use corrected Cgd/Cdb with extrinsic
+terms from `extrinsic_caps()`).
 
-SR+ is limited by the 1st stage driving net5 through Cc. SR- is
-limited by whichever is slower: the 1st stage or M8 discharging
-the output.
+**Effect of nulling resistor Rc on SR+ (important):**
+When Rc > 0, the Miller feedback through Cc is delayed by τ = Rc × Cc.
+During this delay (Phase 1), net5 slews at the much faster rate
+`I_tail / C1` instead of `I_tail / Cc`, because Rc blocks the Cc
+current path and net5 sees only its local parasitic cap C1.
+M7 amplifies this fast net5 transient → the output slews faster than
+`I_tail / Cc` during Phase 1. After ~2τ, the Cc feedback establishes
+and the output settles to the sustained rate `I_tail / Cc` (Phase 2).
+
+The SPICE-measured SR+ captures the peak slope across the 20–80%
+transition, which includes Phase 1. This yields a measured SR+
+*between* the two limits:
+```
+I_tail / Cc ≤ SR+_measured ≤ I_tail / C1
+```
+
+For sizing, use `SR+_sustained = I_tail / Cc` as the conservative
+design target. The actual SR+ will be higher when Rc > 0.
+
+**Effect of M7 Cgd Miller multiplication on SR-:**
+During negative slew, M7 is an active CS amplifier. Its Cgd (including
+the physical gate-drain overlap) appears at the output node multiplied
+by `(1 + A_v2)` where `A_v2 = gm7 / (gds7 + gds8)`. This increases
+the effective CTL for SR- beyond the small-signal estimate:
+```
+CTL_eff = CTL + Cgd7 × A_v2       [Cgd7 includes extrinsic overlap]
+SR-_corrected = min(I_tail / Cc,  ID7 / CTL_eff)
+```
 
 Design constraint for symmetric SR:
 ```
-ID7 ≥ I_tail × CTL / Cc
+ID7 ≥ I_tail × CTL_eff / Cc
 ```
 
 ### Output Swing
@@ -498,3 +552,8 @@ V_cm,max = VDD - |VSG_M1| + VTN       (M1 headroom limit)
 | 1st_out (net5, gate M7) | M2 drain, M4 drain, M7 gate | `C1 = Cgs7 + Cdb2 + Cdb4 + Cgd2 + Cgd4` |
 | Mirror (net1) | M1 drain/gate, M3 drain, M2 gate | `C2 = Cgs1 + Cgs2 + Cdb1 + Cdb3 + Cgd3` |
 | Output (Vout) | M7 drain, M8 drain, CL | `CTL = CL + Cdb7 + Cdb8 + Cgd7 + Cgd8` |
+
+All Cgd and Cdb values MUST include extrinsic components (see
+`general/knowledge/lut-parameter-derivation.md` — Extrinsic Capacitance
+Correction section). The LUT intrinsic Cgd ≈ 0 in saturation; the
+physical gate-drain overlap from `extrinsic_caps()` dominates.

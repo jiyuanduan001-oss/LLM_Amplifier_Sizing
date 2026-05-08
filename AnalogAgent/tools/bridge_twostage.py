@@ -109,7 +109,7 @@ DEFAULT_SPEC_LIST = [
 
 # WL_ratio constraints — lower bound removed (no minimum W/L needed;
 # CircuitCollector and the SKY130 PDK accept any valid width).
-# Upper bound kept to split wide devices into multiple fingers.
+# Upper bound kept to split wide devices into multiple instances (increase M).
 _WL_RATIO_RANGE = {
     "pfet": (0.0, 10.0),
     "nfet": (0.0, 10.0),
@@ -164,14 +164,14 @@ def _role_to_params(role: str, target: RoleTarget) -> dict:
         W_um = max(0.42, id_a * 1e6 / 50.0)
         WL_ratio = W_um / L_um
 
-    # Keep WL_ratio in range using M (finger multiplier)
+    # Keep WL_ratio in range using M (multiplier)
     M = max(1, math.ceil(WL_ratio / wl_max))
-    WL_per_finger = WL_ratio / M
-    WL_per_finger = max(wl_min, WL_per_finger)
+    WL_per_inst = WL_ratio / M
+    WL_per_inst = max(wl_min, WL_per_inst)
 
     return {
         f"{prefix}_L":        round(L_um, 3),
-        f"{prefix}_WL_ratio": round(WL_per_finger, 2),
+        f"{prefix}_WL_ratio": round(WL_per_inst, 2),
         f"{prefix}_M":        M,
     }
 
@@ -189,8 +189,8 @@ def sizing_result_to_params(
     Handles all 6 roles + Cc + ibias. M2/M4 are handled by TOML mosfet_pairs.
 
     Mirror logic:
-      - BIAS_GEN (M5) + TAIL (M6): share per-finger W/L, ratio via M count
-      - OUTPUT_BIAS (M8): mirrors M5, same per-finger W/L if same L
+      - BIAS_GEN (M5) + TAIL (M6): share per-instance W/L, ratio via M count
+      - OUTPUT_BIAS (M8): mirrors M5, same per-instance W/L if same L
 
     Args:
         roles:        Dict of role name -> RoleTarget
@@ -223,7 +223,7 @@ def sizing_result_to_params(
             target = dataclasses.replace(target, L_guidance_um=l_overrides[role])
         params.update(_role_to_params(role, target))
 
-    # BIAS_GEN (M5) + TAIL (M6): current mirror pair (share per-finger W/L)
+    # BIAS_GEN (M5) + TAIL (M6): current mirror pair (share per-instance W/L)
     bias_gen = roles.get("BIAS_GEN")
     tail = roles.get("TAIL")
     if bias_gen and tail and bias_gen.id_derived and tail.id_derived:
@@ -244,21 +244,21 @@ def sizing_result_to_params(
             WL_unit = wl_min
 
         M5 = max(1, math.ceil(WL_unit / wl_max))
-        WL_per_finger = max(wl_min, WL_unit / M5)
+        WL_per_inst = max(wl_min, WL_unit / M5)
 
         mirror_ratio = id_tail / id_ref
         M6 = max(1, round(mirror_ratio * M5))
 
         params.update({
             "M5_L":        round(L_um, 3),
-            "M5_WL_ratio": round(WL_per_finger, 2),
+            "M5_WL_ratio": round(WL_per_inst, 2),
             "M5_M":        M5,
             "M6_L":        round(L_um, 3),
-            "M6_WL_ratio": round(WL_per_finger, 2),
+            "M6_WL_ratio": round(WL_per_inst, 2),
             "M6_M":        M6,
         })
 
-    # OUTPUT_BIAS (M8): mirrors from M5, same per-finger W/L
+    # OUTPUT_BIAS (M8): mirrors from M5, same per-instance W/L
     output_bias = roles.get("OUTPUT_BIAS")
     if output_bias and bias_gen and output_bias.id_derived and bias_gen.id_derived:
         mirror_ratio_s2 = output_bias.id_derived / bias_gen.id_derived
@@ -266,7 +266,7 @@ def sizing_result_to_params(
         if l_overrides and "OUTPUT_BIAS" in l_overrides:
             L_ob = l_overrides["OUTPUT_BIAS"]
 
-        # If L matches M5, use same WL_per_finger and scale M
+        # If L matches M5, use same WL_per_inst and scale M
         if abs(L_ob - (bias_gen.L_guidance_um or 1.0)) < 0.01:
             M8_wl = params.get("M5_WL_ratio", wl_min)
             M8 = max(1, round(mirror_ratio_s2 * params.get("M5_M", 1)))

@@ -100,42 +100,48 @@ meas ac cm_gain find vdb(cm3) at = 0.1
 meas ac dcgain_ find vdb(opout) at = 0.1
 let dcgain = abs(dcgain_)
 let cmrr = -cm_gain
-meas ac gain_bandwidth_product_ when vdb(opout)=0
-let gbp = gain_bandwidth_product_*1e-4
-meas ac phase_margin find vp(opout) when vdb(opout)=0
 meas ac DCPSRp find vdb(ppsr1) at = 0.1
 meas ac DCPSRn find vdb(npsr1) at = 0.1
-* --- Effective GBW vs measured GBW (gain-plateau detection) ---
-* The open-loop 0dB crossing (gain_bandwidth_product_) can be inflated
-* by a zero-compensation plateau when Rc is too large.
-* Detection: for -20dB/dec roll-off, gain at GBW/10 = +20dB.
-* If the LHP zero creates a shelf, the actual gain there is LOWER
-* (the slope was already shallow before reaching the check point).
-* A deficit means the measured GBW is inflated: the open-loop gain
-* only reached 0dB because the shelf extended it beyond the true
-* bandwidth. The deficit in dB equals the inflation.
-let f_check = gain_bandwidth_product_ / 10
-meas ac gain_at_check find vdb(opout) at=f_check
-* gain_peaking_dB = deficit from ideal 20dB (0 = healthy, >0 = plateau)
-let gain_peaking_dB_raw = 20 - gain_at_check
-* Clamp to >= 0 (no penalty for healthy designs)
-if gain_peaking_dB_raw > 0
+
+* --- GBW definition: DC_gain × f_-3dB ---
+* The 0-dB crossing can be misleading when the gain slope deviates from
+* -20 dB/dec (e.g. when device ft < GBW, or Rc creates a gain plateau).
+* Instead, define GBW = A0_linear × f_-3dB, where f_-3dB is the frequency
+* at which the open-loop gain drops 3 dB below its DC value.
+let gain_3dB_level = dcgain_ - 3
+meas ac f_minus3dB when vdb(opout)=gain_3dB_level FALL=1
+let ac_dc_gain_linear = 10 ^ (dcgain / 20)
+let gain_bandwidth_product_ = ac_dc_gain_linear * f_minus3dB
+
+* --- Phase margin at the 0-dB crossing ---
+* PM is still measured at the actual 0-dB crossing (where gain = 0 dB).
+* This is valid even when the rolloff is not -20 dB/dec.
+meas ac phase_margin find vp(opout) when vdb(opout)=0
+
+* --- Gain peaking detection ---
+* Check if gain ever exceeds DC gain (indicates resonance / instability).
+let gain_peak_val = vecmax(vdb(opout))
+let gain_peaking_dB_raw = gain_peak_val - dcgain_
+if gain_peaking_dB_raw > 0.1
   let gain_peaking_dB = gain_peaking_dB_raw
 else
   let gain_peaking_dB = 0
 end
-* true_GBW: the GBW that a -20dB/dec slope from DC gain would predict.
-* true_GBW = 10^(dcgain/20) × f where vdb(opout) = dcgain - 20*log10(f/f_p1)
-* Simplified: true_GBW ≈ measured_GBW / 10^(gain_peaking_dB/20)
-let true_GBW = gain_bandwidth_product_ / 10 ^ (gain_peaking_dB / 20)
+
+* --- true_GBW (kept for backward compatibility) ---
+let true_GBW = gain_bandwidth_product_
+
 {# print AC specs to file #}
 print cm_gain cmrr DCPSRp DCPSRn dcgain_ > {{data_AC}}.txt
-print gain_bandwidth_product_ phase_margin gain_peaking_dB true_GBW > {{data_GBW_PM}}.txt
+print gain_bandwidth_product_ phase_margin gain_peaking_dB true_GBW f_minus3dB > {{data_GBW_PM}}.txt
 * Save DC gain and GBW for noise integration
-let ac_dc_gain_linear = 10 ^ (dcgain / 20)
 set ac_dc_gain_str = "$&ac_dc_gain_linear"
 set gbw_str = "$&gain_bandwidth_product_"
 * plot vdb(opout) vdb(cm3) vdb(ppsr1) vdb(npsr1) vp(opout)
+{% if save_waveforms | default(false) %}
+* --- Save AC waveforms for post-analysis ---
+wrdata {{data_prefix}}_waveform_AC.txt vdb(opout) vp(opout) vdb(cm3) vdb(ppsr1) vdb(npsr1)
+{% endif %}
 {% endif %}
 
 {# op
@@ -212,6 +218,14 @@ let integrated_input_noise  = int_orn_sel * int_b_gbw + (1 - int_orn_sel) * int_
 * Print results
 print input_noise_density_1Hz input_noise_density_spot output_noise_density_1Hz output_noise_density_spot noise_dc_gain > {{data_NOISE}}.txt
 print integrated_output_noise integrated_input_noise >> {{data_NOISE}}.txt
+{% if save_waveforms | default(false) %}
+* --- Save noise spectrum waveform ---
+* inoise_spectrum and onoise_spectrum are in the noise1 plot (pass 1, full range).
+* Apply the swap correction so the saved data is always correct.
+setplot noise1
+let irn_spectrum = is_normal * inoise_spectrum + is_swapped * onoise_spectrum
+wrdata {{data_prefix}}_waveform_NOISE.txt irn_spectrum
+{% endif %}
 {% endif %}
 
 {% if measure_slew_rate %}
@@ -241,6 +255,10 @@ meas tran sr_fall_t1 WHEN V(srout)=sr_v90 FALL=1 TD=$sr_fall_td_str
 meas tran sr_fall_t2 WHEN V(srout)=sr_v40 FALL=1 TD=$sr_fall_td_str
 let slew_rate_neg = (sr_v40 - sr_v90)/(sr_fall_t2 - sr_fall_t1)
 print slew_rate_pos slew_rate_neg > {{data_SLEW_RATE}}.txt
+{% if save_waveforms | default(false) %}
+* --- Save transient slew rate waveform ---
+wrdata {{data_prefix}}_waveform_TRAN.txt v(srout) v(srin)
+{% endif %}
 {% endif %}
 
 {% if measure_output_swing %}
@@ -253,6 +271,10 @@ meas dc vout_low FIND V(swout) WHEN vout_err=0.01 FALL=1
 meas dc vout_high FIND V(swout) WHEN vout_err=0.01 RISE=LAST
 let output_swing = vout_high - vout_low
 print vout_low vout_high output_swing > {{data_OUTPUT_SWING}}.txt
+{% if save_waveforms | default(false) %}
+* --- Save output swing DC sweep waveform ---
+wrdata {{data_prefix}}_waveform_SWING.txt v(swout) v(swin)
+{% endif %}
 {% endif %}
 
 {% if extract_op_region%}

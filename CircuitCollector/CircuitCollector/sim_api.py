@@ -157,6 +157,7 @@ class SimulationAPI:
         "measure_noise": ("testbench", "noise", "measure_noise"),
         "measure_slew_rate": ("testbench", "slew_rate", "measure_slew_rate"),
         "measure_output_swing": ("testbench", "output_swing", "measure_output_swing"),
+        "save_waveforms": ("testbench", "save_waveforms"),
     }
 
     def _run_simulation(self, params: Dict[str, Any]) -> Dict[str, Any]:

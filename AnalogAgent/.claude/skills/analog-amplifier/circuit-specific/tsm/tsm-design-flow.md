@@ -33,7 +33,7 @@ roles during circuit-understanding (Stage [2]).
 | OUTPUT_CS | M7 | pfet | gm7, gds7, Cgs7, Cgd7... |
 | OUTPUT_BIAS | M8 (mirrors M5) | nfet | gm8, gds8... |
 
-Mirror constraints: M5/M6/M8 share per-finger W/L; current ratio set by M.
+Mirror constraints: M5/M6/M8 share per-instance W/L; current ratio set by multiplier M.
 
 ---
 
@@ -79,17 +79,25 @@ gm3 = 2π × GBW × Cc_initial
 | 10–100 MHz  | 10–14 S/A         | Moderate       | Balanced across all aspects |
 | > 100 MHz   | 5–10 S/A          | Strong         | High speed                 |
 
-**1d. Determine L from gain requirement:**
+**1d. Determine L from gain requirement (with GBW/ft guard):**
 
 Sweep available L values in the LUT. For each L, query:
 ```
 gm_gds_M3 = lut_query('nfet', 'gm_gds', L, gm_id_val=(gm/ID)_3)
+ft_M3     = lut_query('nfet', 'ft',     L, gm_id_val=(gm/ID)_3)
 ```
-Pick the shortest L where `gm_gds_M3 / 2 ≥ sqrt(A0_target_linear)`.
+Pick the shortest L where **both** conditions hold:
+1. `gm_gds_M3 / 1.5 ≥ sqrt(A0_target_linear)`  (gain requirement)
+2. `GBW_target / ft_M3 < 0.4`  (analytical PM validity — see `lut-parameter-derivation.md`)
+
+If a candidate L meets the gain requirement but violates GBW/ft < 0.4,
+**reject it** and continue to a shorter L. The analytical PM model is
+unreliable above this threshold.
 
 This distributes gain roughly equally between the two stages (in dB).
-If no L satisfies this, pick L with the highest gm_gds available;
-the second stage provides additional gain. Total gain is verified in Step 6.
+If no L satisfies both, pick L with the highest gm_gds that also keeps
+GBW/ft < 0.4; the second stage provides additional gain. Total gain is
+verified in Step 6.
 
 **1e. Derive all DIFF_PAIR parameters from LUT:**
 
@@ -242,22 +250,22 @@ If max(M6_M, M8_M) > 8: ⚠️ high mirror ratio → risk of VDS compression
   → Recommend increasing I_bias to reduce ratio
 ```
 
-**4c. Derive single-finger (unit cell) parameters from LUT:**
+**4c. Derive unit-cell (single-instance) parameters from LUT:**
 
-> Derive per-finger parameters for **M5** (nfet) using
+> Derive per-instance parameters for **M5** (nfet) using
 > `general/knowledge/lut-parameter-derivation.md` with:
-> device_type='nfet', gm_id=(gm/ID)_5, L=L5, ID=I_bias (per-finger current)
+> device_type='nfet', gm_id=(gm/ID)_5, L=L5, ID=I_bias (per-instance current)
 >
-> This produces: gm_finger, W5, gds_finger, ft5, Cgs_finger, Cgd_finger, Cdb_finger, vdsat5.
+> This produces: gm_inst, W5, gds_inst, ft5, Cgs_inst, Cgd_inst, Cdb_inst, vdsat5.
 
 **4d. Scale to total M6 (TAIL) and M8 (OUTPUT_BIAS):**
 
-M5, M6, M8 share the same per-finger W and L. Scale total quantities
-by each device's finger count M (see `lut-parameter-derivation.md`
+M5, M6, M8 share the same per-instance W and L. Scale total quantities
+by each device's multiplier M (see `lut-parameter-derivation.md`
 mirror scaling section):
 ```
-M6: gm6 = gm_finger × M6_M,  gds6 = gds_finger × M6_M,  (same for Cgs6, Cgd6, Cdb6)
-M8: gm8 = gm_finger × M8_M,  gds8 = gds_finger × M8_M,  (same for Cgs8, Cgd8, Cdb8)
+M6: gm6 = gm_inst × M6_M,  gds6 = gds_inst × M6_M,  (same for Cgs6, Cgd6, Cdb6)
+M8: gm8 = gm_inst × M8_M,  gds8 = gds_inst × M8_M,  (same for Cgs8, Cgd8, Cdb8)
     L8 = L5,  W8 = W5,  M8_M = round(ID7 / I_bias)
 ```
 
@@ -347,27 +355,56 @@ value of the `Vbias_cas_n` port at simulation time (emitted as an
 Cc = gm3 / (2π × GBW)
 ```
 
-Verify PM (with Rc cancelling p2). Use the full node capacitances
-from `tsm-equation.md`:
+Compute node capacitances and derive exact poles via KCL cubic.
+**All Cgd and Cdb values MUST include extrinsic components** from
+`extrinsic_caps()` — see `lut-parameter-derivation.md`:
 ```
-C1     = Cgs7 + Cdb2 + Cdb4 + Cgd2 + Cgd4 + Cgd7   (cap at net5)
+from scripts.lut_lookup import extrinsic_caps
+# For each device, after deriving LUT intrinsic Cgd/Cdb:
+#   ex = extrinsic_caps(dev_type, W_meters, M=multiplier)
+#   Cgd_total = Cgd_intrinsic + ex['cgd_ov']
+#   Cdb_total = Cdb_intrinsic + ex['cdb_sw']
+
+C1     = Cgs7 + Cdb2 + Cdb4 + Cgd2 + Cgd4           (cap at net5, excluding Cgd7)
+CTL    = CL + Cdb7 + Cdb8 + Cgd8                     (cap at vout, excluding Cgd7)
 C2     = Cgs1 + Cgs2 + Cdb1 + Cdb3 + Cgd2 + Cgd3   (cap at net1)
 G_net1 = gm1 + gds1 + gds3
-p3     = G_net1 / C2                                 (mirror pole)
-p4     = gm7 / C1                                    (compensation pole)
+p3     = G_net1 / C2                                 (mirror pole — separate node, accurate)
 fz_mirror = 2 × p3 / (2π)                            (LHP mirror zero)
-fz_rhp    = gm3 / (2π × Cgd3)                        (RHP diff pair Cgd zero)
-PM_est = 90° − arctan(ω_c/p3) − arctan(ω_c/p4) + arctan(ω_c/(fz_mirror×2π)) − arctan(ω_c/(fz_rhp×2π))
-If PM_est < PM_target + 5°: increase Cc (trades GBW for PM)
 ```
 
-**5b. Nulling resistor Rc (LHP zero cancels output pole p2):**
+**5b. Exact poles via KCL cubic (see `tsm-equation.md` for derivation):**
+```python
+import numpy as np
+Go   = gds7 + gds_eq_OBIAS
+G1   = gds_eq_LOAD + gds3          # gds2≡gds_LOAD, gds4≡gds3
+tau  = Rc_approx * Cc               # use approximate Rc for initial cubic
+Ccomp = Cc + Cgd7;  Gt = gm7 + Go + G1;  Ct = CTL + C1
+
+d0 = Go * G1
+d1 = Go*C1 + G1*CTL + Go*G1*tau + Ccomp*Gt
+d2 = C1*CTL + (Go*C1 + G1*CTL)*tau + Ccomp*Ct + tau*Cgd7*Gt
+d3 = C1*CTL*tau + tau*Cgd7*Ct
+
+poles = sorted(np.roots([d3, d2, d1, d0]), key=lambda x: abs(x))
+p1_kcl, p2_kcl, p4_kcl = [abs(p) for p in poles]   # rad/s
 ```
-CTL = CL + Cdb7 + Cdb8 + Cgd7 + Cgd8                (total output cap)
-Rc  = (1/gm7) × (Cc + C1)×(Cc + CTL) / Cc²
+
+**5c. Nulling resistor Rc (LHP zero cancels KCL-derived p2):**
 ```
-This moves the RHP zero from Cc to LHP and places it on top of p2,
-cancelling the output pole.
+Rc = 1/gm7 + 1/(p2_kcl × Cc)
+```
+Then recompute the cubic with the updated Rc (one iteration is sufficient).
+
+**5d. Verify PM:**
+```
+z_Rc   = 1 / (Cc × (Rc - 1/gm7))
+fz_rhp = gm3 / (2π × Cgd3)
+PM_est = 90° − arctan(ω_c/p2_kcl) + arctan(ω_c/z_Rc)
+         − arctan(ω_c/p3) − arctan(ω_c/p4_kcl)
+         + arctan(ω_c/(fz_mirror×2π)) − arctan(ω_c/(fz_rhp×2π))
+If PM_est < PM_target + 5°: increase Cc (trades GBW for PM)
+```
 
 ### Step 6 — Analytical spec evaluation
 
@@ -397,43 +434,71 @@ First, compute sub-block effective quantities for LOAD and OUTPUT_BIAS.
 > - `gds_eq_TAIL`, `p_int_TAIL`, `V_headroom_TAIL`
 
 Then compute node capacitances and all specs (see `tsm-equation.md`
-and `tsm-transfer-function.md` for derivation):
-```
+and `tsm-transfer-function.md` for derivation).
+
+**All Cgd and Cdb values below MUST include extrinsic components** from
+`extrinsic_caps()`. Call `extrinsic_caps(dev_type, W, M=M)` for each
+device and add `cgd_ov` to Cgd, `cdb_sw` to Cdb (see
+`lut-parameter-derivation.md`).
+
+```python
 # DC gain
 A_v1  = gm3 / (gds3 + gds_eq_LOAD)
 A_v2  = gm7 / (gds7 + gds_eq_OBIAS)
 A0    = A_v1 × A_v2
 
 # Node capacitances (single load/output-bias — see tsm-equation.md for cascode variants)
-C1     = Cgs7 + Cdb2 + Cdb4 + Cgd2 + Cgd4 + Cgd7     (cap at net5)
-CTL    = CL + Cdb7 + Cdb8 + Cgd7 + Cgd8               (total output cap)
+# NOTE: Cgd and Cdb here are corrected totals (intrinsic + extrinsic)
+# Cgd7 is excluded from C1 and CTL — it couples net5↔vout and is handled by the KCL cubic.
+C1     = Cgs7 + Cdb2 + Cdb4 + Cgd2 + Cgd4             (cap at net5, excl. Cgd7)
+CTL    = CL + Cdb7 + Cdb8 + Cgd8                       (total output cap, excl. Cgd7)
 C2     = Cgs1 + Cgs2 + Cdb1 + Cdb3 + Cgd2 + Cgd3     (cap at net1)
 G_net1 = gm1 + gds1 + gds3                             (net1 conductance)
 
-# Compensation
+# GBW
 GBW   = gm3 / (2π × Cc)
 ω_c   = 2π × GBW
-Rc    = (1/gm7) × (Cc + C1)×(Cc + CTL) / Cc²          (LHP zero cancels p2)
 
-# Poles
-p2    = gm7·Cc / (C1·Cc + C1·CTL + Cc·CTL)            (output pole — cancelled by Rc)
+# KCL-derived exact poles for net5-vout coupled system (see tsm-equation.md)
+Go    = gds7 + gds_eq_OBIAS
+G1    = gds_eq_LOAD + gds3
+Rc_approx = (1/gm7) × (Cc + C1) × (Cc + CTL) / Cc²   (initial estimate)
+tau   = Rc_approx × Cc
+Ccomp = Cc + Cgd7;  Gt = gm7 + Go + G1;  Ct = CTL + C1
+
+d0 = Go × G1
+d1 = Go×C1 + G1×CTL + Go×G1×tau + Ccomp×Gt
+d2 = C1×CTL + (Go×C1 + G1×CTL)×tau + Ccomp×Ct + tau×Cgd7×Gt
+d3 = C1×CTL×tau + tau×Cgd7×Ct
+
+poles = sorted(numpy.roots([d3, d2, d1, d0]), key=lambda x: abs(x))
+p1_kcl, p2_kcl, p4_kcl = [abs(p) for p in poles]     (rad/s)
+
+# Recompute Rc to cancel the KCL-derived p2
+Rc    = 1/gm7 + 1/(p2_kcl × Cc)
+
+# Mirror pole (separate node — not part of the cubic)
 p3    = G_net1 / C2                                     (mirror pole)
-p4    = gm7 / C1                                        (compensation pole)
 
 # Zeros
+z_Rc      = 1 / (Cc × (Rc - 1/gm7))                   (LHP zero, ≈ p2_kcl)
 fz_mirror = 2 × p3 / (2π)                              (LHP mirror zero)
 fz_rhp    = gm3 / (2π × Cgd3)                          (RHP diff pair Cgd zero)
 
-# Phase margin (with Rc cancelling p2)
-PM    = 90° − arctan(ω_c/p3) − arctan(ω_c/p4) + arctan(ω_c/(fz_mirror×2π)) − arctan(ω_c/(fz_rhp×2π))
+# Phase margin (using KCL-derived poles)
+PM    = 90° − arctan(ω_c/p2_kcl) + arctan(ω_c/z_Rc)
+        − arctan(ω_c/p3) − arctan(ω_c/p4_kcl)
+        + arctan(ω_c/(fz_mirror×2π)) − arctan(ω_c/(fz_rhp×2π))
 # Add cascode internal pole penalties if present:
 if p_int_LOAD  is not None: PM -= degrees(arctan(ω_c / p_int_LOAD))
 if p_int_OBIAS is not None: PM -= degrees(arctan(ω_c / p_int_OBIAS))
 if p_int_TAIL  is not None: PM -= degrees(arctan(ω_c / p_int_TAIL))
 
-# Other specs
-SR+   = I_tail / Cc
-SR-   = min(I_tail / Cc, ID7 / CTL)
+# Slew rate (see tsm-equation.md for full derivation)
+SR+   = I_tail / Cc                     # sustained (conservative)
+# Note: with Rc > 0, SPICE SR+ will be higher (Rc delays Cc feedback)
+CTL_eff = CTL + Cgd7 * A_v2             # M7 Cgd Miller effect
+SR-   = min(I_tail / Cc, ID7 / CTL_eff)
 Swing = VDD - vdsat7 - V_headroom_OBIAS
 P     = VDD × (I_bias + I_tail + ID7)
 
@@ -447,6 +512,25 @@ PSRR⁻    = A0 / (A_VSS_M8 + A_VSS_M6)
 
 # PSRR⁺ (same structure; substitute gds_eq for single gds where applicable):
 PSRR⁺    = A0 · (gds7 - gds_eq_OBIAS) / |gds7 - gm7·gds3/gm1|
+```
+
+**GBW/ft validity check (MANDATORY before printing results):**
+
+After computing GBW, verify that GBW/ft < 0.4 for every signal-path
+device. This guards against unreliable analytical PM predictions.
+
+```
+GBW/ft CHECK
+=============
+Device | ft (MHz) | GBW/ft | Status
+M3     | <>       | <>     | ✅ / ❌ REJECT (≥ 0.4)
+M1     | <>       | <>     | ✅ / ❌ REJECT (≥ 0.4)
+M7     | <>       | <>     | ✅ / ❌ REJECT (≥ 0.4)
+
+If any device has GBW/ft ≥ 0.4:
+  → Reduce L for that device (shorter L → higher ft)
+  → Re-derive LUT parameters for the affected role
+  → Repeat Step 6
 ```
 
 Print the results and compare against user spec targets:
@@ -463,7 +547,8 @@ PM            | <>°        | <>°         | ✅/❌
 ```
 
 **Decision:**
-- All specs met → proceed to Step 7 (simulation).
+- All specs met AND all GBW/ft < 0.4 → proceed to Step 7 (simulation).
+- Any GBW/ft ≥ 0.4 → reduce L for violating device, re-derive, repeat Step 6.
 - Any spec failed → invoke `tsm-root-cause-diagnosis.md` to identify
   which device parameter to adjust. Apply the fix, re-derive LUT values
   for the affected role, and repeat Step 6.
@@ -477,7 +562,7 @@ Call `convert_sizing` and `simulate_circuit`:
 from tools import convert_sizing, simulate_circuit
 
 result = convert_sizing(
-    topology='twostage',
+    topology=topology_name,   # from ensure_topology_registered() in Stage [2]
     roles_raw={
         "DIFF_PAIR":    {"gm_id_target": (gm/ID)_3, "L_guidance_um": L3, "id_derived": ID3},
         "LOAD":         {"gm_id_target": (gm/ID)_1, "L_guidance_um": L1, "id_derived": ID1},
@@ -512,13 +597,13 @@ sim = simulate_circuit(
     #   user's Mismatch field is BLANK → measure_mismatch=False
     #   user provided a numeric Mismatch target → measure_mismatch=True
     measure_mismatch=mismatch_enabled,   # bool from Stage [1] spec form
-    # LV-cascode bias overrides — include every time a load / output-bias
-    # / tail sub-block is lv_cascode, recomputed from the CURRENT
-    # iteration's sized vdsat/vth:
+    # LV-cascode bias overrides — ONLY if any role has sub_block_type == "lv_cascode":
+    # Uncomment and populate when lv_cascode is detected in circuit-understanding.
+    # For single or regular cascode sub-blocks, omit extra_ports entirely.
     # extra_ports={
-    #     "Vbias_cas_p": VDD - (vdsat1 + vdsat_lcas + abs(vth_lcas)),  # PMOS load
-    #     "Vbias_cas_n_tail": vdsat6 + vdsat_tcas + abs(vth_tcas),     # NMOS tail
-    #     "Vbias_cas_n": vdsat8 + vdsat_obcas + abs(vth_obcas),        # NMOS OUTPUT_BIAS
+    #     "Vbias_cas_p": VDD - (vdsat1 + vdsat_lcas + abs(vth_lcas)),  # PMOS load lv_cascode
+    #     "Vbias_cas_n_tail": vdsat6 + vdsat_tcas + abs(vth_tcas),     # NMOS tail lv_cascode
+    #     "Vbias_cas_n": vdsat8 + vdsat_obcas + abs(vth_obcas),        # NMOS OUTPUT_BIAS lv_cascode
     # },
 )
 ```

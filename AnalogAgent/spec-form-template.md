@@ -36,13 +36,13 @@ I_bias       : 10e-6        # External bias current (A)
 # Diagnosis focuses on two fixes: (1) increase WxL (transistor area),
 # (2) reduce |Vdsat| (push toward weaker inversion).
 #
-Mismatch     : 20e-3            # 3-sigma mismatch offset (V) — Monte Carlo, 50 runs
+Mismatch     :             # 3-sigma mismatch offset (V) — Monte Carlo, 50 runs
                             #   Leave BLANK to skip mismatch entirely
 
 ## Post-Sizing Options
-Extreme_PVT  : yes          # yes/no — run additional sims at extreme corners
+Extreme_PVT  : no          # yes/no — run additional sims at extreme corners
                             #   after sizing converges (SS/85C + FF/-40C)
-Optimize     : yes          # yes/no — run numerical optimization after sizing
+Optimize     : no          # yes/no — run numerical optimization after sizing
                             #   converges. After the LLM sizing stage, the system
                             #   will ask which metric to prioritize: Power, Gain,
                             #   or GBW. The selected metric receives a higher

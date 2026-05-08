@@ -142,10 +142,11 @@ PM < PM_target
     │   → Or increase gm1 (move p3 up — but W1 must also increase → tradeoff)
     │
     ├── Compensation pole p4 too close to ω_c
-    │   → Increase gm7 (moves p4 = gm7/C1 up)
+    │   → Increase gm7 (raises p4 — recompute via KCL cubic)
+    │   → Or reduce C1 parasitic (shorter L7 or smaller W1/W2)
     │
     ├── RHP zero not cancelled / p2 not fully cancelled
-    │   → Recompute Rc = (1/gm7)·(1+CL/Cc) after any gm7 or Cc change
+    │   → Recompute Rc = 1/gm7 + 1/(p2_kcl × Cc) after any parameter change
     │
     └── PM estimation was optimistic
         → Check: was arctan(x)≈x used with x > 0.47?

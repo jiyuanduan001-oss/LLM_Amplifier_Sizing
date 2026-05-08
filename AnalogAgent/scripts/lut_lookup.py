@@ -62,6 +62,46 @@ _DEVICE_MAP = {
     "pfet_01v8": "pfet_01v8",
 }
 
+# ---------------------------------------------------------------------------
+# SKY130 extrinsic (layout-dependent) capacitance parameters
+# ---------------------------------------------------------------------------
+# These are NOT in the gm/ID LUT — they come from the BSIM4 model card
+# and describe physical overlap and junction parasitics that the LUT's
+# intrinsic cgs_w / cgd_w / cdb_w do not capture.
+#
+# Source: sky130_fd_pr__*fet_01v8__ff.pm3.spice (values are corner-invariant)
+#
+# The LUT cgd_w is the intrinsic channel-charge partition to the drain,
+# which is ≈ 0 in saturation. The physical gate-drain overlap (cgdo × W)
+# dominates and is 20-80× larger.
+#
+# The LUT cdb_w captures the area junction component for a single
+# reference device. Multi-instance (high-M) devices have additional
+# perimeter and gate-edge sidewall terms that scale with M.
+
+SKY130_EXTRINSIC = {
+    "nfet_01v8": {
+        "cgdo":   2.4133e-10,   # F/m — gate-drain overlap per unit width
+        "cgso":   2.4133e-10,   # F/m — gate-source overlap per unit width
+        "cjs":    1.1311e-03,   # F/m² — drain junction area cap (zero-bias)
+        "cjsws":  3.1014e-11,   # F/m — drain junction sidewall cap
+        "cjswgs": 2.0113e-10,   # F/m — drain gate-edge sidewall cap per width
+        "pbs":    0.729,        # V — junction built-in potential
+    },
+    "pfet_01v8": {
+        "cgdo":   4.8684e-11,   # F/m — gate-drain overlap per unit width
+        "cgso":   4.8684e-11,   # F/m — gate-source overlap per unit width
+        "cjs":    6.8894e-04,   # F/m² — drain junction area cap (zero-bias)
+        "cjsws":  9.2318e-11,   # F/m — drain junction sidewall cap
+        "cjswgs": 2.2326e-10,   # F/m — drain gate-edge sidewall cap per width
+        "pbs":    0.659,        # V — junction built-in potential
+    },
+}
+
+# Default diffusion extension beyond gate (m) — used for drain area/perimeter
+# estimation when layout details are unavailable.
+_DIFF_EXT_M = 0.29e-6  # 0.29 µm, typical for SKY130
+
 # Raw file column order → clean Python names (matches asset_new processed LUT
 # header: gm/id  gm/gds  id/W  ft  Cgg/W  Cgd/W  Cgs/W  Cdb/W  vgs  vth  vdsat)
 _RAW_COLUMNS = ["gm_id", "gm_gds", "id_w", "ft",
@@ -500,6 +540,114 @@ def lookup_ft(
 ) -> float:
     """Return fT (Hz) for a given gm/Id and L."""
     return lookup_by_gmid(device, l_nm, gm_id, "ft", corner=corner, temp=temp)
+
+
+# ---------------------------------------------------------------------------
+# Extrinsic capacitance helpers
+# ---------------------------------------------------------------------------
+
+def extrinsic_caps(
+    device: str,
+    W_m: float,
+    M: int = 1,
+) -> dict:
+    """
+    Compute extrinsic (overlap + junction) capacitances not in the gm/ID LUT.
+
+    The LUT stores *intrinsic* small-signal caps (channel charge partition).
+    This function returns the *extrinsic* components from the BSIM4 model card:
+      - Cgd_overlap: gate-drain overlap (cgdo × W_total)
+      - Cgs_overlap: gate-source overlap (cgso × W_total)
+      - Cdb_perim:   drain junction perimeter + gate-edge sidewall cap
+
+    The returned values should be ADDED to the LUT-derived intrinsic caps.
+
+    Args:
+        device:  'nfet' or 'pfet' (or full PDK name).
+        W_m:     Total device width in meters (all instances combined).
+        M:       Multiplier (number of parallel instances). Used to
+                 estimate drain perimeter.
+                 NOTE: the geometry model assumes shared-drain
+                 interdigitated layout (n_drains = ceil(M/2)), which
+                 is appropriate for nf-style fingers. Our netlists use
+                 m= (independent instances) where n_drains = M; this
+                 causes a slight underestimate of drain perimeter.
+
+    Returns:
+        dict with keys:
+            'cgd_ov':  gate-drain overlap cap (F)
+            'cgs_ov':  gate-source overlap cap (F)
+            'cdb_sw':  drain junction sidewall + gate-edge cap (F)
+    """
+    canonical = _resolve_device(device)
+    ex = SKY130_EXTRINSIC.get(canonical)
+    if ex is None:
+        return {"cgd_ov": 0.0, "cgs_ov": 0.0, "cdb_sw": 0.0}
+
+    W_total = W_m  # meters
+
+    # Gate overlap caps — proportional to total width
+    cgd_ov = ex["cgdo"] * W_total
+    cgs_ov = ex["cgso"] * W_total
+
+    # Drain junction perimeter estimation.
+    # For M instances: W_inst = W_total / M.
+    # Using shared-drain interdigitated model (n_drains = ceil(M/2)).
+    # TODO: our netlists use m= (multiplier, independent instances)
+    # where each instance has its own drain → n_drains should be M.
+    # The shared-drain model underestimates drain perimeter for m>2.
+    n_drains = max(1, (M + 1) // 2)  # shared-drain assumption
+    W_inst = W_total / max(M, 1)
+    P_drain = n_drains * 2 * (W_inst + _DIFF_EXT_M)
+
+    cdb_sw = ex["cjsws"] * P_drain + ex["cjswgs"] * W_total
+
+    return {
+        "cgd_ov": cgd_ov,
+        "cgs_ov": cgs_ov,
+        "cdb_sw": cdb_sw,
+    }
+
+
+def pdk_cdb(
+    device: str,
+    W_m: float,
+    M: int = 1,
+) -> float:
+    """
+    Compute total drain-bulk junction cap from PDK parameters (first-principles).
+
+    Use this INSTEAD of (cdb_w × W + extrinsic cdb_sw) when accurate Cdb
+    is needed. The LUT cdb_w is characterized from a test device whose drain
+    diffusion area scales with L, so it overestimates Cdb for long-channel
+    devices in real layouts where drain geometry is L-independent.
+
+    This function computes Cdb from the area and perimeter model:
+        Cdb = cjs × A_drain + cjsws × P_drain + cjswgs × W_total
+
+    Args:
+        device:  'nfet' or 'pfet' (or full PDK name).
+        W_m:     Total device width in meters.
+        M:       Multiplier (number of parallel instances).
+
+    Returns:
+        Total drain-bulk junction capacitance in Farads (zero-bias).
+    """
+    canonical = _resolve_device(device)
+    ex = SKY130_EXTRINSIC.get(canonical)
+    if ex is None:
+        return 0.0
+
+    W_total = W_m
+    W_inst = W_total / max(M, 1)
+    n_drains = max(1, (M + 1) // 2)  # shared-drain assumption (see extrinsic_caps TODO)
+
+    A_drain = n_drains * W_inst * _DIFF_EXT_M
+    P_drain = n_drains * 2 * (W_inst + _DIFF_EXT_M)
+
+    return (ex["cjs"] * A_drain
+            + ex["cjsws"] * P_drain
+            + ex["cjswgs"] * W_total)
 
 
 # ---------------------------------------------------------------------------

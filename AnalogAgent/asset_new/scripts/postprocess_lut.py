@@ -84,14 +84,33 @@ def process_file(infile: Path, outfile: Path, device: str, corner: str, temp: st
     if not gm_id:
         return 0
 
-    # No peak-truncation — small ngspice-version differences in off-state
-    # leakage current can place the apparent gm/id peak anywhere in the
-    # cutoff region, which (if used as a cut point) discards most of the
-    # useful sizing range. The id>1e-15 / gm>1e-18 filters above are
-    # already sufficient to remove unphysical noise. This matches the row
-    # count of the legacy processed LUTs.
-    cols = [gm_id, gm_gds, id_W, ft, cgg_W, cgd_W, cgs_W, cdb_W,
-            vgs_col, vth_col, vdsat_col]
+    # --- Trim sub-threshold branch ----------------------------------------
+    # The VGS sweep produces a gm/id curve that rises toward a peak at the
+    # edge of weak inversion, then falls through strong inversion.  Only the
+    # strong-inversion side of the peak is usable for sizing.  We locate the
+    # peak and keep the side whose far endpoint has the larger id/W.
+    # If the peak is at a boundary the sub-threshold region was never swept
+    # and no trimming is needed.
+    gm_id_arr = np.array(gm_id)
+    id_W_arr  = np.array(id_W)
+    peak_idx  = int(np.argmax(gm_id_arr))
+
+    if 0 < peak_idx < len(gm_id_arr) - 1:
+        left_far_idw  = abs(id_W_arr[0])
+        right_far_idw = abs(id_W_arr[-1])
+        if right_far_idw >= left_far_idw:
+            # Strong inversion is on the right (after peak) — typical for NFET
+            keep_start, keep_end = peak_idx, len(gm_id_arr)
+        else:
+            # Strong inversion is on the left (before peak) — typical for PFET
+            keep_start, keep_end = 0, peak_idx + 1
+    else:
+        keep_start, keep_end = 0, len(gm_id_arr)
+
+    # Apply trim to all columns
+    all_cols = [gm_id, gm_gds, id_W, ft, cgg_W, cgd_W, cgs_W, cdb_W,
+                vgs_col, vth_col, vdsat_col]
+    cols = [c[keep_start:keep_end] for c in all_cols]
 
     L_nm = int(infile.stem.split("_L")[1].rstrip("n"))
     L_um = L_nm / 1000.0

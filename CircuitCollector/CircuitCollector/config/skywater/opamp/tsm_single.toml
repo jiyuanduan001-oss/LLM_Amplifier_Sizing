@@ -1,0 +1,143 @@
+[tech]
+name = "skywater"
+
+[type]
+name = "opamp"
+
+[opamp]
+name = "tsm_single"
+
+[tech_lib]
+pdk_path = "PDK/sky130_pdk"
+corner = "tt"
+
+[testbench.dc]
+measure_DC = true
+supply_voltage = 1.8
+VCM_ratio = 0.5
+temperature = 27
+
+[testbench.ac]
+measure_AC = true
+ac_freq = 100
+ac_amp = 500
+PARAM_CLOAD = 5.00
+
+[testbench.ibias]
+use_ibias = true
+multi_ibias = false
+ibias = 3e-5
+
+[circuit.params_file]
+use_params_file = true
+generate_params_file = true
+API_mode = false
+generate_num_params = 10
+
+[circuit.params_format]
+use_width_to_length_ratio = true
+ration_field_suffix = "WL_ratio"
+
+[circuit.params_range]
+M1_L_range = [0.15, 5.0, 0.01]
+M1_W_range = [0.55, 10.0, 0.1]
+M1_M_range = [1, 100, 1]
+M1_WL_ratio_range = [3.7, 30.0, 0.1]
+
+M3_L_range = [0.15, 5.0, 0.01]
+M3_W_range = [0.42, 10.0, 0.1]
+M3_M_range = [1, 100, 1]
+M3_WL_ratio_range = [2.8, 30.0, 0.1]
+
+M5_L_range = [0.15, 5.0, 0.01]
+M5_W_range = [0.42, 10.0, 0.1]
+M5_M_range = [1, 100, 1]
+M5_WL_ratio_range = [2.8, 30.0, 0.1]
+
+M7_L_range = [0.15, 5.0, 0.01]
+M7_W_range = [0.55, 10.0, 0.1]
+M7_M_range = [1, 100, 1]
+M7_WL_ratio_range = [3.7, 30.0, 0.1]
+
+C1_value_range = [1e-15, 1e-12, 1e-15]
+Rc_value_range = [1e3, 1e6, 1e3]
+
+ibias_range = [1e-6, 1e-4, 1e-6]
+
+[circuit.params]
+M1_L = 0.15
+M1_WL_ratio = 3.7
+M1_M = 1
+
+M3_L = 0.15
+M3_WL_ratio = 2.8
+M3_M = 1
+
+M5_L = 0.15
+M5_WL_ratio = 2.8
+M5_M = 1
+
+M7_L = 0.15
+M7_WL_ratio = 3.7
+M7_M = 1
+
+C1_value = 1e-12
+Rc_value = 1e4
+
+[circuit.mosfet_pairs]
+M1 = "M2"
+M3 = "M4"
+M5 = ["M6", "M8"]
+
+[circuit.op_region]
+extract_op_region = true
+device_prefix = "msky130_fd_pr__"
+op_variable_list_mos = [
+    "gm", "gds", "gmbs",
+    "vgs", "vds", "vbs", "vth", "vdsat", "id",
+    "cgs", "cgd", "cdb", "csb",
+]
+
+[circuit.op_region.transistor_dict]
+M1 = "pfet_01v8"
+M2 = "pfet_01v8"
+M3 = "nfet_01v8"
+M4 = "nfet_01v8"
+M5 = "nfet_01v8"
+M6 = "nfet_01v8"
+M7 = "pfet_01v8"
+M8 = "nfet_01v8"
+
+[testbench.noise]
+measure_noise = true
+noise_fstart = 0.1
+noise_fstop = "1G"
+noise_fspot = 10000
+
+[testbench.slew_rate]
+measure_slew_rate = true
+sr_vstep = 0.5
+sr_tdelay = "10n"
+sr_trise = "1n"
+sr_tfall = "1n"
+sr_tpw = "5u"
+sr_tperiod = "10u"
+sr_tstep = "1n"
+sr_tstop = "20u"
+
+[testbench.output_swing]
+measure_output_swing = true
+swing_vstep = 0.001
+
+[testbench.mismatch]
+measure_mismatch = true
+mc_num_runs = 50
+
+[testbench.data]
+data_DC = "DC"
+data_AC = "AC"
+data_GBW_PM = "GBW_PM"
+data_NOISE = "NOISE"
+data_SLEW_RATE = "SLEW_RATE"
+data_OUTPUT_SWING = "OUTPUT_SWING"
+data_MISMATCH = "MISMATCH"
