@@ -19,6 +19,15 @@ this skill maps each failure to its root cause and recommends a fix.
 
 ---
 
+## ⚠️ Power Utilization — Read Before Any Fault Tree
+
+Before diving into individual fault trees, check whether the design is
+using its power budget. If power is well below target while specs are
+failing, consider increasing I_tail first — it improves GBW, noise,
+and CMRR simultaneously (gm scales with current at fixed gm/ID).
+
+---
+
 ## Fault Tree: Device Not Saturated
 
 ### M3 (TAIL) in linear region
