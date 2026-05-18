@@ -25,12 +25,12 @@ User (specs + netlist)
         |
         v
 +-------------------+     HTTP (port 8001)     +--------------------+
-|   AnalogAgent     | <---------------------> | CircuitCollector    |
+|   AnalogAgent     | <--------------------->  |  CircuitCollector  |
 |                   |                          |                    |
 |  - LLM reasoning  |    /simulate/            | - Testbench gen    |
 |  - gm/ID LUT      |    /register_circuit/    | - ngspice runner   |
-|  - Skill stack     |    /health               | - Result parser    |
-|  - Optimizer       |                          | - SKY130 PDK       |
+|  - Skill stack    |    /health               | - Result parser    |
+|  - Optimizer      |                          | - SKY130 PDK       |
 +-------------------+                          +--------------------+
 ```
 
