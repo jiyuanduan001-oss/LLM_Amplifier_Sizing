@@ -4,7 +4,7 @@ An LLM-driven analog amplifier sizing system using **gm/ID methodology**, **ngsp
 
 ## Why this project?
 
-LLMs can reason about circuits, but they cannot size them reliably. They hallucinate device parameters, lose track of units, and have no way to verify whether a design actually works. Meanwhile, traditional analog sizing tools require deep expert knowledge to set up and iterate.
+LLMs can reason about circuits, but they cannot size them reliably. They lack of domain knowledge and PDK information, and have no way to verify whether a design actually works. Meanwhile, traditional analog sizing tools require deep expert knowledge to set up and iterate.
 
 This project bridges the gap. It gives the LLM agent everything a human designer uses — **gm/ID look-up tables**, **analytical equations**, **SPICE simulation**, and **structured diagnosis** — so the agent can size circuits the way an expert would, but faster and without manual intervention.
 
