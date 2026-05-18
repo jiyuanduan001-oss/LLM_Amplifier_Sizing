@@ -1,6 +1,6 @@
 # LLM-Assisted Analog Amplifier Sizing
 
-An LLM-driven analog amplifier sizing system using **gm/ID methodology**, **ngspice SPICE simulation**, and **iterative root-cause diagnosis** on the SKY130 open-source PDK.
+An LLM-driven analog amplifier sizing system using **gm/ID methodology**, **ngspice SPICE simulation**, and **self iteration** on the SKY130 open-source PDK.
 
 ## Why this project?
 
