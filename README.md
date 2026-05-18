@@ -112,7 +112,7 @@ See [AnalogAgent/README.md](README.md) and [CircuitCollector/README.md](../Circu
 | FastAPI | 0.118+ | Simulation server |
 | Conda/Miniforge | Latest | Environment management |
 
-## Authors
+## Contributors
 
 | Name | Affiliation | Email |
 |------|-------------|-------|
@@ -127,7 +127,7 @@ See [AnalogAgent/README.md](README.md) and [CircuitCollector/README.md](../Circu
 ## References
 
 - P. G. A. Jespers and B. Murmann, *Systematic Design of Analog CMOS Circuits: Using Pre-Computed Lookup Tables*. Cambridge University Press, 2017.
-- B. Murmann, "gm/ID-Based Design Methodology" (Stanford)
+- Razavi, B. 2000a. Design of Analog CMOS Integrated Circuits. McGraw-Hill, Inc.
 - SkyWater SKY130 Open-Source PDK: https://github.com/google/skywater-pdk
 - ngspice Open-Source SPICE Simulator: https://ngspice.sourceforge.io/
 
