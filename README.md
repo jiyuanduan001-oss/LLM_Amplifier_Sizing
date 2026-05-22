@@ -58,7 +58,7 @@ Use the skills to size the 5tota_single; use the specs in the template.
 
 The agent reads the skill stack in `skills/analog-amplifier/`, identifies the topology, and runs the full flow:
 
-1. Spec validation (5 required fields: VDD, CL, Gain, GBW, PM)
+1. Spec validation 
 2. Topology identification from the netlist
 3. gm/ID-based initial sizing with LUT queries
 4. Analytical pre-screening (poles, zeros, PM, gain, all specs)
